@@ -130,12 +130,12 @@ def build_html(
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>BioCO2 Expansion Map</title>
+<title>BioCO2 Expansion Map in Europe</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
   integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
 <style>
   html, body, #map {{ height: 100%; margin: 0; }}
-  .map-title {{ position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 1000; background: linear-gradient(135deg, #00143B 0%, #D18F41 50%, #006660 100%); color: white; padding: 12px 30px; border-radius: 25px; box-shadow: 0 4px 15px rgba(0,0,0,0.3); font-size: 24px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; }}
+  .map-title {{ position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 1000; background: linear-gradient(135deg, #00143B 0%, #006660 100%); color: white; padding: 12px 30px; border-radius: 25px; box-shadow: 0 4px 15px rgba(0,0,0,0.3); font-size: 24px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; }}
   .controls {{ position: absolute; top: 10px; left: 10px; z-index: 1000; background: #fff; padding: 10px; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); max-height: 85%; width: 280px; max-width: 50vw; font-size: 14px; }}
   .controls.collapsed {{ padding: 6px; width: auto; }}
   .controls-header {{ display:flex; align-items:center; justify-content:space-between; gap: 8px; margin-bottom: 6px; }}
@@ -174,10 +174,18 @@ def build_html(
   .swatch-circle {{ border-radius: 50%; }}
   .swatch-square {{ border-radius: 2px; }}
   .swatch-diamond {{ transform: rotate(45deg); transform-origin: center; border-radius: 0; }}
-  .swatch-triangle {{ width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-bottom: 10px solid; border-top: 0; }}
+  .swatch-star {{ position: relative; width: 0; height: 0; border: none; border-left: 6px solid transparent; border-right: 6px solid transparent; border-bottom: 4px solid; flex: 0 0 12px; }}
+  .swatch-star::before {{ content: ''; position: absolute; width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-top: 4px solid; top: 2px; left: -6px; }}
+  .swatch-star::after {{ content: '★'; position: absolute; font-size: 14px; left: -7px; top: -10px; }}
   .counter {{ font-size: 13px; color: #444; margin-top: 4px; }}
   .note {{ font-size: 13px; color: #666; margin-top: 4px; }}
   .divider {{ height: 1px; background: #eee; margin: 6px 0; }}
+  .zoom-mode-indicator {{ position: absolute; top: 10px; left: 50%; transform: translateX(-50%); background: rgba(156, 39, 176, 0.95); color: white; padding: 12px 20px; border-radius: 8px; font-weight: 600; font-size: 14px; z-index: 1000; box-shadow: 0 4px 12px rgba(0,0,0,0.3); display: none; }}
+  .zoom-mode-active {{ display: block; animation: pulse 2s ease-in-out infinite; }}
+  @keyframes pulse {{
+    0%, 100% {{ opacity: 1; }}
+    50% {{ opacity: 0.8; }}
+  }}
   .btns {{ display:flex; gap:6px; flex-wrap:wrap; margin:4px 0; }}
   .btn {{ font-size:13px; padding:4px 10px; border:1px solid #ddd; border-radius:6px; background:#f8f8f8; cursor:pointer; }}
   .btn-eiffel {{ background:#ffd700; border-color:#cc9900; font-weight: 600; }}
@@ -193,8 +201,9 @@ def build_html(
 </style>
 </head>
 <body>
-<div class="map-title">BioCO2 Expansion Map</div>
+<div class="map-title">BioCO2 Expansion Map in Europe</div>
 <div id="map"></div>
+<div id="zoom-mode-indicator" class="zoom-mode-indicator">🔍 Zoom-in Mode: Showing all sites within 100km</div>
 <div class="controls" id="controls">
   <div class="controls-header">
     <div class="controls-title">Legend & Filters</div>
@@ -371,9 +380,11 @@ def build_html(
   const LAYER_CATEGORY_MAP = {json.dumps(layer_category_map)};
 
   const map = L.map('map', {{ zoomControl: true }});
-  L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
+  // Use CartoDB Light (light gray background) for a clean, uniform appearance
+  L.tileLayer('https://{{s}}.basemaps.cartocdn.com/light_all/{{z}}/{{x}}/{{y}}{{r}}.png', {{
     maxZoom: 19,
-    attribution: '&copy; OpenStreetMap contributors'
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+    subdomains: 'abcd'
   }}).addTo(map);
   const bounds = L.latLngBounds([[{min_lat}, {min_lon}], [{max_lat}, {max_lon}]]);
   map.fitBounds(bounds.pad(0.1));
@@ -440,10 +451,10 @@ def build_html(
     return mk;
   }}
 
-  function makeTriangleMarker(lat, lon, color, sizePx, popupHtml, props) {{
-    const sz = Math.max(10, Math.round((sizePx || 10) * 2));
-    const html = `<div class="triangle-wrap" style="width:${{sz}}px;height:${{sz}}px;">
-      <div class="triangle" style="border-bottom-color:${{color}};"></div>
+  function makeStarMarker(lat, lon, color, sizePx, popupHtml, props) {{
+    const sz = Math.max(12, Math.round((sizePx || 10) * 2));
+    const html = `<div style="width:${{sz}}px;height:${{sz}}px;display:flex;align-items:center;justify-content:center;">
+      <span style="color:${{color}};font-size:${{sz}}px;line-height:1;">★</span>
     </div>`;
     const icon = L.divIcon({{ html: html, className: '', iconSize: [sz, sz], iconAnchor: [sz/2, sz/2] }});
     const mk = L.marker([lat, lon], {{ icon: icon, zIndexOffset: 150 }}).bindPopup(popupHtml);
@@ -461,18 +472,39 @@ def build_html(
   }}
 
   SITES.forEach(s => {{
-    // All sites use circle markers for now (can be customized later per layer/category)
+    // Different shapes per layer: Circle for Supply, Star for Offtake, Diamond for Competitors
     let m;
-    m = L.circleMarker([s.lat, s.lon], {{
-      radius: s.radius || 10,
-      color: s.color || '#000',
-      weight: 2,
-      fillColor: s.color || '#000',
-      fillOpacity: 0.7
-    }}).bindPopup(makePopup(s));
+    const radius = s.radius || 10;
+    const color = s.color || '#000';
+    
+    if (s.layer === 'Supply') {{
+      // Circle marker for Supply
+      m = L.circleMarker([s.lat, s.lon], {{
+        radius: radius,
+        color: color,
+        weight: 2,
+        fillColor: color,
+        fillOpacity: 0.7
+      }}).bindPopup(makePopup(s));
+    }} else if (s.layer === 'Offtake') {{
+      // Star marker for Offtake
+      m = makeStarMarker(s.lat, s.lon, color, radius, makePopup(s), s);
+    }} else if (s.layer === 'Competitors') {{
+      // Diamond marker for Competitors
+      m = makeDiamondMarker(s.lat, s.lon, color, radius, makePopup(s), s);
+    }} else {{
+      // Default to circle for unknown layers
+      m = L.circleMarker([s.lat, s.lon], {{
+        radius: radius,
+        color: color,
+        weight: 2,
+        fillColor: color,
+        fillOpacity: 0.7
+      }}).bindPopup(makePopup(s));
+    }}
     
     m._props = s;
-    m._originalStyle = {{ color: s.color, fillColor: s.color }};
+    m._originalStyle = {{ color: color, fillColor: color }};
     allMarkers.push(m);
   }});
 
@@ -483,7 +515,7 @@ def build_html(
     'Competitors': document.getElementById('layer-competitors-content')
   }};
 
-  function addTechnoRow(container, category, label, color, idx, prefix, checked) {{
+  function addTechnoRow(container, category, label, color, idx, prefix, checked, layer) {{
     const row = document.createElement('label');
     row.className = 'heatmap-control';
     const cb = document.createElement('input');
@@ -495,9 +527,24 @@ def build_html(
     leftSpan.style.display = 'flex';
     leftSpan.style.alignItems = 'center';
     leftSpan.style.gap = '8px';
+    
+    // Create shape indicator based on layer
     const sw = document.createElement('span');
-    sw.className = 'swatch swatch-circle';
-    sw.style.background = color || '#000';
+    if (layer === 'Supply') {{
+      sw.className = 'swatch swatch-circle';
+      sw.style.background = color || '#000';
+    }} else if (layer === 'Offtake') {{
+      sw.className = 'swatch swatch-star';
+      sw.style.color = color || '#000';
+    }} else if (layer === 'Competitors') {{
+      sw.className = 'swatch swatch-diamond';
+      sw.style.background = color || '#000';
+    }} else {{
+      // Default to circle
+      sw.className = 'swatch swatch-circle';
+      sw.style.background = color || '#000';
+    }}
+    
     const textSpan = document.createElement('span');
     textSpan.textContent = label;
     leftSpan.appendChild(cb);
@@ -552,7 +599,7 @@ def build_html(
             if (LAYER_CATEGORY_MAP[layer][category]) {{
               const technos = LAYER_CATEGORY_MAP[layer][category];
               technos.forEach(techno => {{
-                addTechnoRow(subSection, category, techno, TECHNO_COLORS[techno], techIdx++, 'tech', preselectTech);
+                addTechnoRow(subSection, category, techno, TECHNO_COLORS[techno], techIdx++, 'tech', preselectTech, layer);
               }});
             }}
           }});
@@ -564,7 +611,7 @@ def build_html(
         Object.keys(LAYER_CATEGORY_MAP[layer]).forEach(category => {{
           const technos = LAYER_CATEGORY_MAP[layer][category];
           technos.forEach(techno => {{
-            addTechnoRow(container, category, techno, TECHNO_COLORS[techno], techIdx++, 'tech', preselectTech);
+            addTechnoRow(container, category, techno, TECHNO_COLORS[techno], techIdx++, 'tech', preselectTech, layer);
           }});
         }});
       }}
@@ -676,6 +723,117 @@ def build_html(
         }}
       }}
     }});
+  }});
+
+  // Zoom-in mode functionality
+  let zoomModeActive = false;
+  let zoomModeCircle = null;
+  let zoomModeFocusSite = null;
+  const ZOOM_IN_THRESHOLD = 10; // Zoom level to activate zoom-in mode
+  const RADIUS_KM = 100; // 100km radius
+
+  // Calculate distance between two points in km (Haversine formula)
+  function getDistance(lat1, lon1, lat2, lon2) {{
+    const R = 6371; // Earth radius in km
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+              Math.sin(dLon/2) * Math.sin(dLon/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return R * c;
+  }}
+
+  // Enter zoom-in mode
+  function enterZoomMode(site, latlng, clickedMarker) {{
+    zoomModeActive = true;
+    zoomModeFocusSite = site;
+    
+    // Show indicator
+    document.getElementById('zoom-mode-indicator').classList.add('zoom-mode-active');
+    
+    // Draw 100km radius circle with better visibility
+    if (zoomModeCircle) {{
+      map.removeLayer(zoomModeCircle);
+    }}
+    zoomModeCircle = L.circle(latlng, {{
+      radius: RADIUS_KM * 1000, // Convert to meters
+      color: '#9C27B0',
+      fillColor: '#E1BEE7',
+      fillOpacity: 0.15,
+      weight: 4,
+      dashArray: '15, 10',
+      className: 'radius-circle'
+    }}).addTo(map);
+    
+    // Clear and show all sites within 100km
+    markersLayer.clearLayers();
+    let focusMarker = null;
+    allMarkers.forEach(m => {{
+      const s = m._props;
+      const distance = getDistance(site.lat, site.lon, s.lat, s.lon);
+      if (distance <= RADIUS_KM) {{
+        markersLayer.addLayer(m);
+        if (s === site) {{
+          focusMarker = m;
+        }}
+      }}
+    }});
+    
+    updateVisibleCount();
+    
+    // Zoom in on the site
+    map.setView(latlng, Math.max(map.getZoom(), ZOOM_IN_THRESHOLD + 1), {{
+      animate: true,
+      duration: 0.8
+    }});
+    
+    // Keep the popup open for the selected site
+    setTimeout(() => {{
+      if (focusMarker) {{
+        focusMarker.openPopup();
+      }} else if (clickedMarker) {{
+        clickedMarker.openPopup();
+      }}
+    }}, 900); // Open after zoom animation completes
+  }}
+
+  // Exit zoom-in mode
+  function exitZoomMode() {{
+    if (!zoomModeActive) return;
+    
+    zoomModeActive = false;
+    zoomModeFocusSite = null;
+    
+    // Hide indicator
+    document.getElementById('zoom-mode-indicator').classList.remove('zoom-mode-active');
+    
+    // Remove radius circle
+    if (zoomModeCircle) {{
+      map.removeLayer(zoomModeCircle);
+      zoomModeCircle = null;
+    }}
+    
+    // Restore normal filter mode
+    applyFilters();
+  }}
+
+  // Add click handlers to all markers
+  allMarkers.forEach(m => {{
+    m.on('click', (e) => {{
+      const site = m._props;
+      const latlng = e.latlng;
+      
+      // Enter zoom-in mode when clicking a site
+      enterZoomMode(site, latlng, m);
+    }});
+  }});
+
+  // Monitor zoom level - exit zoom mode when zooming out
+  map.on('zoomend', () => {{
+    if (zoomModeActive && map.getZoom() < ZOOM_IN_THRESHOLD) {{
+      exitZoomMode();
+    }}
   }});
 
   // Individual heatmap layers
@@ -1003,7 +1161,7 @@ def main():
                 all_technos.extend(layer_category_map[layer][category])
     color_map = {t: palette[i % len(palette)] for i, t in enumerate(all_technos)}
     # Add Greenhouses to color map (will be added later from ghg_intensity.csv)
-    color_map['Greenhouses'] = '#4CAF50'  # Green color for greenhouses
+    color_map['Greenhouses'] = '#FF6B35'  # Rainbow color (red-yellow mix) for greenhouses
 
     # Sizing strategy
     cap_scaler = make_scaler(df[capacity_col], args.min_radius, args.max_radius) if capacity_col in df.columns else (lambda v: (args.min_radius + args.max_radius)/2)
