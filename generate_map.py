@@ -115,6 +115,7 @@ def build_html(
     visibility_mode: str,
     heat_radius: int,
     heat_blur: int,
+    ors_api_key: str = "",
 ) -> str:
     (min_lat, min_lon, max_lat, max_lon) = bounds
     # Visibility predicate JS based on mode
@@ -180,12 +181,6 @@ def build_html(
   .counter {{ font-size: 13px; color: #444; margin-top: 4px; }}
   .note {{ font-size: 13px; color: #666; margin-top: 4px; }}
   .divider {{ height: 1px; background: #eee; margin: 6px 0; }}
-  .zoom-mode-indicator {{ position: absolute; top: 10px; left: 50%; transform: translateX(-50%); background: rgba(156, 39, 176, 0.95); color: white; padding: 12px 20px; border-radius: 8px; font-weight: 600; font-size: 14px; z-index: 1000; box-shadow: 0 4px 12px rgba(0,0,0,0.3); display: none; }}
-  .zoom-mode-active {{ display: block; animation: pulse 2s ease-in-out infinite; }}
-  @keyframes pulse {{
-    0%, 100% {{ opacity: 1; }}
-    50% {{ opacity: 0.8; }}
-  }}
   .btns {{ display:flex; gap:6px; flex-wrap:wrap; margin:4px 0; }}
   .btn {{ font-size:13px; padding:4px 10px; border:1px solid #ddd; border-radius:6px; background:#f8f8f8; cursor:pointer; }}
   .btn-eiffel {{ background:#ffd700; border-color:#cc9900; font-weight: 600; }}
@@ -203,7 +198,6 @@ def build_html(
 <body>
 <div class="map-title">BioCO2 Expansion Map in Europe</div>
 <div id="map"></div>
-<div id="zoom-mode-indicator" class="zoom-mode-indicator">🔍 Zoom-in Mode: Showing all sites within 100km</div>
 <div class="controls" id="controls">
   <div class="controls-header">
     <div class="controls-title">Legend & Filters</div>
@@ -725,116 +719,9 @@ def build_html(
     }});
   }});
 
-  // Zoom-in mode functionality
-  let zoomModeActive = false;
-  let zoomModeCircle = null;
-  let zoomModeFocusSite = null;
-  const ZOOM_IN_THRESHOLD = 10; // Zoom level to activate zoom-in mode
-  const RADIUS_KM = 100; // 100km radius
+  // OLD ZOOM MODE VARIABLES REMOVED - Now using isochrone mode
 
-  // Calculate distance between two points in km (Haversine formula)
-  function getDistance(lat1, lon1, lat2, lon2) {{
-    const R = 6371; // Earth radius in km
-    const dLat = (lat2 - lat1) * Math.PI / 180;
-    const dLon = (lon2 - lon1) * Math.PI / 180;
-    const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-              Math.sin(dLon/2) * Math.sin(dLon/2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-    return R * c;
-  }}
-
-  // Enter zoom-in mode
-  function enterZoomMode(site, latlng, clickedMarker) {{
-    zoomModeActive = true;
-    zoomModeFocusSite = site;
-    
-    // Show indicator
-    document.getElementById('zoom-mode-indicator').classList.add('zoom-mode-active');
-    
-    // Draw 100km radius circle with better visibility
-    if (zoomModeCircle) {{
-      map.removeLayer(zoomModeCircle);
-    }}
-    zoomModeCircle = L.circle(latlng, {{
-      radius: RADIUS_KM * 1000, // Convert to meters
-      color: '#9C27B0',
-      fillColor: '#E1BEE7',
-      fillOpacity: 0.15,
-      weight: 4,
-      dashArray: '15, 10',
-      className: 'radius-circle'
-    }}).addTo(map);
-    
-    // Clear and show all sites within 100km
-    markersLayer.clearLayers();
-    let focusMarker = null;
-    allMarkers.forEach(m => {{
-      const s = m._props;
-      const distance = getDistance(site.lat, site.lon, s.lat, s.lon);
-      if (distance <= RADIUS_KM) {{
-        markersLayer.addLayer(m);
-        if (s === site) {{
-          focusMarker = m;
-        }}
-      }}
-    }});
-    
-    updateVisibleCount();
-    
-    // Zoom in on the site
-    map.setView(latlng, Math.max(map.getZoom(), ZOOM_IN_THRESHOLD + 1), {{
-      animate: true,
-      duration: 0.8
-    }});
-    
-    // Keep the popup open for the selected site
-    setTimeout(() => {{
-      if (focusMarker) {{
-        focusMarker.openPopup();
-      }} else if (clickedMarker) {{
-        clickedMarker.openPopup();
-      }}
-    }}, 900); // Open after zoom animation completes
-  }}
-
-  // Exit zoom-in mode
-  function exitZoomMode() {{
-    if (!zoomModeActive) return;
-    
-    zoomModeActive = false;
-    zoomModeFocusSite = null;
-    
-    // Hide indicator
-    document.getElementById('zoom-mode-indicator').classList.remove('zoom-mode-active');
-    
-    // Remove radius circle
-    if (zoomModeCircle) {{
-      map.removeLayer(zoomModeCircle);
-      zoomModeCircle = null;
-    }}
-    
-    // Restore normal filter mode
-    applyFilters();
-  }}
-
-  // Add click handlers to all markers
-  allMarkers.forEach(m => {{
-    m.on('click', (e) => {{
-      const site = m._props;
-      const latlng = e.latlng;
-      
-      // Enter zoom-in mode when clicking a site
-      enterZoomMode(site, latlng, m);
-    }});
-  }});
-
-  // Monitor zoom level - exit zoom mode when zooming out
-  map.on('zoomend', () => {{
-    if (zoomModeActive && map.getZoom() < ZOOM_IN_THRESHOLD) {{
-      exitZoomMode();
-    }}
-  }});
+  // OLD ZOOM MODE CODE REMOVED - Now using isochrone mode instead
 
   // Individual heatmap layers
   const heatmaps = {{
@@ -1052,8 +939,512 @@ def build_html(
     toggleBtn.textContent = controlsEl.classList.contains('collapsed') ? '+' : '–';
   }});
 
+  // ========== ISOCHRONE FUNCTIONALITY ==========
+  // Heavy truck driving distance isochrones using OpenRouteService API
+  
+  const ORS_API_KEY = "{ors_api_key}";
+  let zoomMode = false;  // True when zoomed in on a site
+  let isochroneEnabled = false;  // True when user toggles isochrone ON
+  let isochroneLayers = [];
+  let currentFocusSite = null;  // The site currently zoomed in on
+  let savedFilteredMarkers = [];  // Store filtered markers before showing all
+  
+  // Fetch multiple isochrones in a single API call (Heavy Goods Vehicle profile)
+  async function fetchTruckIsochronesMultiple(lat, lon, timeMinutesArray) {{
+    if (!ORS_API_KEY || ORS_API_KEY === "") {{
+      console.error("❌ No OpenRouteService API key provided");
+      return null;
+    }}
+    
+    console.log(`🚛 Fetching truck isochrones for: [${{lat}}, ${{lon}}], times: ${{timeMinutesArray.join(', ')}}min`);
+    
+    // Use CORS proxy to avoid CORS issues when opening from file://
+    const corsProxy = 'https://corsproxy.io/?';
+    const apiUrl = `https://api.openrouteservice.org/v2/isochrones/driving-hgv?api_key=${{ORS_API_KEY}}`;
+    const url = corsProxy + encodeURIComponent(apiUrl);
+    
+    const body = {{
+      locations: [[lon, lat]], // ORS uses [lon, lat] order
+      range: timeMinutesArray.map(m => m * 60) // Convert minutes to seconds
+    }};
+    
+    console.log(`📤 Using CORS proxy...`);
+    console.log(`📤 Request body: ${{JSON.stringify(body)}}`);
+    
+    try {{
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+      
+      const startTime = Date.now();
+      const response = await fetch(url, {{
+        method: 'POST',
+        headers: {{
+          'Content-Type': 'application/json',
+          'Accept': 'application/json, application/geo+json'
+        }},
+        body: JSON.stringify(body),
+        signal: controller.signal
+      }});
+      
+      clearTimeout(timeoutId);
+      const elapsed = Date.now() - startTime;
+      
+      console.log(`📥 Response status: ${{response.status}} ${{response.statusText}} (${{elapsed}}ms)`);
+      
+      if (!response.ok) {{
+        const errorText = await response.text();
+        console.error(`❌ API error after ${{elapsed}}ms: HTTP ${{response.status}}`);
+        console.error(`   Response:`, errorText);
+        return null;
+      }}
+      
+      const data = await response.json();
+      console.log(`✅ Truck isochrones received (${{elapsed}}ms), features: ${{data.features ? data.features.length : 0}}`);
+      return data;
+    }} catch (error) {{
+      console.error(`❌ Exception fetching isochrones:`, error);
+      console.error(`   Error: ${{error.message}}`);
+      return null;
+    }}
+  }}
+  
+  // Extrapolate a 2-hour isochrone from 30min and 60min data using directional analysis
+  function extrapolateIsochrone(iso30, iso60, centerLat, centerLon) {{
+    try {{
+      if (!iso30.features || !iso60.features || 
+          iso30.features.length === 0 || iso60.features.length === 0) {{
+        console.error('❌ Invalid isochrone data for extrapolation');
+        return null;
+      }}
+      
+      const coords30 = iso30.features[0].geometry.coordinates[0];
+      const coords60 = iso60.features[0].geometry.coordinates[0];
+      
+      console.log(`📐 Extrapolating 2h from ${{coords30.length}} points (30min) and ${{coords60.length}} points (60min)`);
+      
+      // Helper: Calculate distance between two points
+      const distance = (lon1, lat1, lon2, lat2) => {{
+        const dx = lon2 - lon1;
+        const dy = lat2 - lat1;
+        return Math.sqrt(dx * dx + dy * dy);
+      }};
+      
+      // Helper: Get angle from center to point
+      const angle = (lon, lat) => Math.atan2(lat - centerLat, lon - centerLon);
+      
+      // For each point in the 60min isochrone, find its growth pattern
+      const coords120 = coords60.map((coord60, i) => {{
+        const lon60 = coord60[0];
+        const lat60 = coord60[1];
+        const bearing = angle(lon60, lat60);
+        
+        // Find closest point in 30min isochrone with similar bearing
+        let closestIdx = 0;
+        let minAngleDiff = Infinity;
+        
+        coords30.forEach((coord30, j) => {{
+          const bearing30 = angle(coord30[0], coord30[1]);
+          let angleDiff = Math.abs(bearing - bearing30);
+          // Handle angle wrapping (-π to π)
+          if (angleDiff > Math.PI) angleDiff = 2 * Math.PI - angleDiff;
+          
+          if (angleDiff < minAngleDiff) {{
+            minAngleDiff = angleDiff;
+            closestIdx = j;
+          }}
+        }});
+        
+        const coord30 = coords30[closestIdx];
+        const lon30 = coord30[0];
+        const lat30 = coord30[1];
+        
+        // Calculate distances from center
+        const dist30 = distance(centerLon, centerLat, lon30, lat30);
+        const dist60 = distance(centerLon, centerLat, lon60, lat60);
+        
+        // Calculate growth in this specific direction
+        // Using linear extrapolation: dist(t) follows a pattern
+        // We observe dist(30) and dist(60), extrapolate to dist(120)
+        
+        // Method: Assume diminishing growth rate (more realistic for roads)
+        // Growth from 0->30: dist30
+        // Growth from 30->60: (dist60 - dist30)
+        // Growth from 60->90: (dist60 - dist30) * 0.9  (diminishing)
+        // Growth from 90->120: (dist60 - dist30) * 0.8 (further diminishing)
+        
+        const growth30to60 = dist60 - dist30;
+        const growth60to90 = growth30to60 * 0.85;  // 85% of previous growth
+        const growth90to120 = growth30to60 * 0.70; // 70% of initial growth
+        
+        const dist120 = dist60 + growth60to90 + growth90to120;
+        
+        // Calculate new coordinates maintaining the bearing
+        const lon120 = centerLon + (lon60 - centerLon) * (dist120 / dist60);
+        const lat120 = centerLat + (lat60 - centerLat) * (dist120 / dist60);
+        
+        return [lon120, lat120];
+      }});
+      
+      // Calculate some statistics for logging
+      const avgDist30 = coords30.reduce((sum, c) => 
+        sum + distance(centerLon, centerLat, c[0], c[1]), 0) / coords30.length;
+      const avgDist60 = coords60.reduce((sum, c) => 
+        sum + distance(centerLon, centerLat, c[0], c[1]), 0) / coords60.length;
+      const avgDist120 = coords120.reduce((sum, c) => 
+        sum + distance(centerLon, centerLat, c[0], c[1]), 0) / coords120.length;
+      
+      const ratio60_30 = avgDist60 / avgDist30;
+      const ratio120_60 = avgDist120 / avgDist60;
+      
+      console.log(`📊 Extrapolation stats:`);
+      console.log(`   30min avg: ${{avgDist30.toFixed(4)}}, 60min avg: ${{avgDist60.toFixed(4)}}, 120min avg: ${{avgDist120.toFixed(4)}}`);
+      console.log(`   Growth 30→60: ${{ratio60_30.toFixed(2)}}x, Growth 60→120: ${{ratio120_60.toFixed(2)}}x (diminishing)`);
+      
+      // Create GeoJSON structure matching API response
+      return {{
+        type: 'FeatureCollection',
+        bbox: iso60.bbox,
+        features: [{{
+          type: 'Feature',
+          geometry: {{
+            type: 'Polygon',
+            coordinates: [coords120]
+          }},
+          properties: {{
+            value: 7200,
+            center: [centerLon, centerLat],
+            extrapolated: true,
+            method: 'directional_diminishing'
+          }}
+        }}],
+        metadata: {{
+          attribution: 'Extrapolated from OpenRouteService data using directional analysis',
+          query: {{ profile: 'driving-hgv', range: [7200] }}
+        }}
+      }};
+    }} catch (error) {{
+      console.error('❌ Error extrapolating isochrone:', error);
+      return null;
+    }}
+  }}
+  
+  // Enter zoom mode when clicking a site
+  function enterZoomMode(site, latlng, marker) {{
+    if (zoomMode && currentFocusSite === site) {{
+      // Already zoomed on this site, just show popup
+      console.log(`📍 Viewing site: ${{site.name}}`);
+      marker.openPopup();
+      return;
+    }}
+    
+    zoomMode = true;
+    currentFocusSite = site;
+    console.log(`🔍 Zooming to site: ${{site.name}}`);
+    
+    // Save current filtered markers
+    savedFilteredMarkers = [];
+    markersLayer.eachLayer(m => savedFilteredMarkers.push(m));
+    
+    // Zoom to site (zoom level 11 for close-up view)
+    map.setView(latlng, 11, {{ animate: true, duration: 0.6 }});
+    
+    // Open popup
+    setTimeout(() => marker.openPopup(), 700);
+    
+    // Show toggle button
+    const toggle = document.getElementById('isochrone-toggle');
+    if (toggle) toggle.style.display = 'block';
+  }}
+  
+  // Fetch and display isochrones for the current focus site
+  async function fetchAndShowIsochrones() {{
+    if (!currentFocusSite) return;
+    
+    const site = currentFocusSite;
+    console.log(`🚛 Fetching isochrones for: ${{site.name}}`);
+    
+    // Show ALL sites (so user can explore neighbors)
+    // Don't clear - just add any missing markers to preserve click handlers
+    const currentMarkers = new Set();
+    markersLayer.eachLayer(m => currentMarkers.add(m));
+    allMarkers.forEach(m => {{
+      if (!currentMarkers.has(m)) {{
+        markersLayer.addLayer(m);
+      }}
+    }});
+    updateVisibleCount();
+    console.log(`   Showing all sites for exploration`);
+    
+    // Show legend
+    const legend = document.getElementById('isochrone-legend');
+    if (legend) legend.style.display = 'block';
+    
+    // Fetch both isochrones in a single API call (30min, 60min - API limit is 1h)
+    const fetchStart = Date.now();
+    const isoData = await fetchTruckIsochronesMultiple(site.lat, site.lon, [30, 60]);
+    console.log(`⏱️ Fetch completed in ${{Date.now() - fetchStart}}ms`);
+    
+    // Clear old isochrone layers
+    isochroneLayers.forEach(layer => map.removeLayer(layer));
+    isochroneLayers = [];
+    
+    // Draw isochrones if API succeeded
+    if (isoData && isoData.features && isoData.features.length > 0) {{
+      console.log(`✅ Drawing ${{isoData.features.length}} truck isochrones`);
+      
+      // Sort features by range value (smallest to largest)
+      const sortedFeatures = isoData.features.sort((a, b) => 
+        (a.properties.value || 0) - (b.properties.value || 0)
+      );
+      
+      // Draw each isochrone with appropriate styling
+      sortedFeatures.forEach((feature, index) => {{
+        const timeMinutes = (feature.properties.value || 0) / 60;
+        let style;
+        
+        if (timeMinutes <= 35) {{ // 30min isochrone (light purple)
+          style = {{
+            color: '#BA68C8',
+            fillColor: '#BA68C8',
+            fillOpacity: 0.15,
+            weight: 2,
+            dashArray: '5, 5'
+          }};
+        }} else {{ // 60min (1h) isochrone (medium purple)
+          style = {{
+            color: '#9C27B0',
+            fillColor: '#9C27B0',
+            fillOpacity: 0.15,
+            weight: 2,
+            dashArray: '5, 5'
+          }};
+        }}
+        
+        const layer = L.geoJSON({{
+          type: 'FeatureCollection',
+          features: [feature]
+        }}, {{ 
+          style: style,
+          interactive: false  // Allow clicks to pass through to markers below
+        }}).addTo(map);
+        isochroneLayers.push(layer);
+      }});
+      
+      // Extrapolate 120min (2h) isochrone from 30min and 60min data
+      if (sortedFeatures.length >= 2) {{
+        console.log('📐 Extrapolating 2h isochrone from 30min and 60min data...');
+        const iso30 = {{ type: 'FeatureCollection', features: [sortedFeatures[0]] }};
+        const iso60 = {{ type: 'FeatureCollection', features: [sortedFeatures[1]] }};
+        const iso120 = extrapolateIsochrone(iso30, iso60, site.lat, site.lon);
+        
+        if (iso120) {{
+          const layer120 = L.geoJSON(iso120, {{
+            style: {{
+              color: '#7B1FA2',
+              fillColor: '#7B1FA2',
+              fillOpacity: 0.2,
+              weight: 3,
+              dashArray: '10, 8'
+            }},
+            interactive: false  // Allow clicks to pass through to markers below
+          }}).addTo(map);
+          isochroneLayers.push(layer120);
+          console.log('✅ 2h extrapolation complete');
+        }}
+      }}
+    }} else {{
+      console.warn('❌ Isochrone API call failed');
+      alert('Unable to fetch truck isochrones. API may be unavailable or rate limited.');
+    }}
+  }}
+  
+  // Hide isochrones
+  function hideIsochrones() {{
+    console.log('� Hiding isochrones');
+    isochroneEnabled = false;
+    
+    // Remove isochrone layers
+    isochroneLayers.forEach(layer => map.removeLayer(layer));
+    isochroneLayers = [];
+    
+    // Hide legend
+    const legend = document.getElementById('isochrone-legend');
+    if (legend) legend.style.display = 'none';
+    
+    // Restore filtered markers (hide unselected categories)
+    if (savedFilteredMarkers.length > 0) {{
+      markersLayer.clearLayers();
+      savedFilteredMarkers.forEach(m => markersLayer.addLayer(m));
+      updateVisibleCount();
+    }}
+    
+    // Update checkbox
+    updateIsochroneToggleUI();
+  }}
+  
+  // Exit zoom mode completely
+  function exitZoomMode() {{
+    if (!zoomMode) return;
+    
+    console.log('👋 Exiting zoom mode');
+    zoomMode = false;
+    currentFocusSite = null;
+    
+    // Remove isochrone layers
+    if (isochroneEnabled) {{
+      isochroneEnabled = false;
+      isochroneLayers.forEach(layer => map.removeLayer(layer));
+      isochroneLayers = [];
+      
+      // Hide legend
+      const legend = document.getElementById('isochrone-legend');
+      if (legend) legend.style.display = 'none';
+      
+      // Update checkbox
+      updateIsochroneToggleUI();
+    }}
+    
+    // Hide toggle button
+    const toggle = document.getElementById('isochrone-toggle');
+    if (toggle) toggle.style.display = 'none';
+    
+    // Clear saved markers
+    savedFilteredMarkers = [];
+    
+    // Restore filtered view
+    applyFilters();
+  }}
+  
+  // Update isochrone toggle UI
+  function updateIsochroneToggleUI() {{
+    const checkbox = document.getElementById('isochrone-checkbox');
+    const toggle = document.getElementById('isochrone-toggle');
+    
+    if (!checkbox || !toggle) return;
+    
+    if (isochroneEnabled) {{
+      checkbox.innerHTML = '✓';
+      checkbox.style.background = '#7B1FA2';
+      checkbox.style.color = 'white';
+      toggle.style.borderColor = '#7B1FA2';
+    }} else {{
+      checkbox.innerHTML = '';
+      checkbox.style.background = 'white';
+      toggle.style.borderColor = '#ccc';
+    }}
+  }}
+  
+  // Toggle isochrone on/off
+  async function toggleIsochrone() {{
+    if (!zoomMode || !currentFocusSite) return;
+    
+    isochroneEnabled = !isochroneEnabled;
+    updateIsochroneToggleUI();
+    
+    if (isochroneEnabled) {{
+      await fetchAndShowIsochrones();
+    }} else {{
+      hideIsochrones();
+    }}
+  }}
+  
+  // Add click handlers to markers
+  allMarkers.forEach(m => {{
+    m.on('click', (e) => {{
+      const site = m._props;
+      const latlng = e.latlng;
+      enterZoomMode(site, latlng, m);
+    }});
+  }});
+  
+  // Exit zoom mode when zooming out
+  map.on('zoomend', () => {{
+    if (zoomMode && map.getZoom() < 8) {{
+      console.log(`🔍 Zoom level ${{map.getZoom()}} < 8: exiting zoom mode`);
+      exitZoomMode();
+    }}
+  }});
+  
   // Initial count
   updateVisibleCount();
+  
+  // Create isochrone toggle button
+  const isochroneToggle = document.createElement('div');
+  isochroneToggle.id = 'isochrone-toggle';
+  isochroneToggle.style.cssText = `
+    position: absolute;
+    bottom: 20px;
+    right: 20px;
+    z-index: 1000;
+    background: white;
+    padding: 12px 16px;
+    border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+    cursor: pointer;
+    user-select: none;
+    transition: all 0.3s ease;
+    border: 2px solid #ccc;
+    display: none;
+  `;
+  isochroneToggle.innerHTML = `
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <div id="isochrone-checkbox" style="
+        width: 20px;
+        height: 20px;
+        border: 2px solid #7B1FA2;
+        border-radius: 4px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: white;
+        transition: all 0.3s ease;
+      "></div>
+      <div style="font-weight: 600; color: #333;">Show Isochrone Area</div>
+    </div>
+  `;
+  document.body.appendChild(isochroneToggle);
+  
+  // Add click handler to the isochrone toggle button
+  isochroneToggle.addEventListener('click', toggleIsochrone);
+  
+  // Create isochrone legend
+  const isochroneLegend = document.createElement('div');
+  isochroneLegend.id = 'isochrone-legend';
+  isochroneLegend.style.cssText = `
+    position: absolute;
+    bottom: 80px;
+    right: 20px;
+    z-index: 1000;
+    background: rgba(255, 255, 255, 0.95);
+    padding: 15px;
+    border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+    font-size: 13px;
+    min-width: 200px;
+    display: none;
+    border: 2px solid #7B1FA2;
+  `;
+  isochroneLegend.innerHTML = `
+    <div style="font-weight: 700; font-size: 15px; color: #7B1FA2; margin-bottom: 10px; border-bottom: 2px solid #7B1FA2; padding-bottom: 5px;">
+      🚛 Heavy Truck Drive Time
+    </div>
+    <div style="display: flex; align-items: center; gap: 10px; margin: 8px 0;">
+      <div style="width: 20px; height: 20px; background: rgba(186, 104, 200, 0.3); border: 2px solid #BA68C8; border-radius: 50%;"></div>
+      <div>30 minutes</div>
+    </div>
+    <div style="display: flex; align-items: center; gap: 10px; margin: 8px 0;">
+      <div style="width: 20px; height: 20px; background: rgba(156, 39, 176, 0.3); border: 2px solid #9C27B0; border-radius: 50%;"></div>
+      <div>1 hour</div>
+    </div>
+    <div style="display: flex; align-items: center; gap: 10px; margin: 8px 0;">
+      <div style="width: 20px; height: 20px; background: rgba(123, 31, 162, 0.3); border: 2px dashed #7B1FA2; border-radius: 50%;"></div>
+      <div><strong>2 hours</strong> <span style="font-size: 10px; color: #666;">(extrapolated)</span></div>
+    </div>
+    <div style="margin-top: 10px; padding-top: 8px; border-top: 1px solid #ddd; font-size: 11px; color: #666; font-style: italic;">
+      <span style="font-size: 10px;">2h estimated from 30min & 1h data</span>
+    </div>
+  `;
+  document.body.appendChild(isochroneLegend);
 </script>
 </body>
 </html>
@@ -1093,6 +1484,11 @@ def main():
     )
     ap.add_argument("--heat-radius", type=int, default=20, help="Heatmap radius")
     ap.add_argument("--heat-blur", type=int, default=15, help="Heatmap blur")
+    
+    # OpenRouteService API key for isochrones
+    default_ors_key = "eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6IjJlZGRmYTM3NTExNzRmMmZhY2U5NWE4YzQ5ZjIwMjI5IiwiaCI6Im11cm11cjY0In0="
+    ap.add_argument("--ors-api-key", default=default_ors_key, help="OpenRouteService API key for truck isochrones")
+    
     args = ap.parse_args()
 
     df = pd.read_csv(args.csv, encoding="latin-1", sep=None, engine="python")
@@ -1356,6 +1752,7 @@ def main():
         visibility_mode=args.visibility_mode,
         heat_radius=args.heat_radius,
         heat_blur=args.heat_blur,
+        ors_api_key=args.ors_api_key,
     )
 
     Path(args.out).write_text(html, encoding="utf-8")
