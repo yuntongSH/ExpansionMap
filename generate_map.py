@@ -320,6 +320,13 @@ def build_html(
   .btn-eiffel.active {{ background:#ffeb3b; box-shadow: 0 0 8px rgba(255,215,0,0.6); }}
   #controls-body {{ overflow: auto; max-height: calc(75vh - 60px); }}
   .controls.collapsed #controls-body {{ display: none; }}
+  /* Search bar styles */
+  .search-container {{ margin: 10px 0; padding: 8px; background: linear-gradient(135deg, #f0f4ff 0%, #e8f0fe 100%); border-radius: 8px; border: 1px solid #cce0ff; }}
+  #operator-search {{ width: 100%; padding: 10px 12px; border: 2px solid #4285f4; border-radius: 6px; font-size: 14px; outline: none; transition: all 0.2s; box-sizing: border-box; }}
+  #operator-search:focus {{ border-color: #1a73e8; box-shadow: 0 0 8px rgba(66, 133, 244, 0.3); }}
+  #search-results-info {{ margin-top: 6px; font-size: 12px; color: #1967d2; font-weight: 500; min-height: 18px; }}
+  .search-highlight {{ animation: pulse 0.5s ease-in-out; }}
+  @keyframes pulse {{ 0%, 100% {{ transform: scale(1); }} 50% {{ transform: scale(1.15); }} }}
   /* Demand sector diamond marker (DivIcon) */
   .diamond-wrap {{ position: relative; width: 16px; height: 16px; }}
   .diamond {{ width: 100%; height: 100%; transform: rotate(45deg); transform-origin: center; opacity: 0.8; border: 2px solid #333; box-sizing: border-box; }}
@@ -337,6 +344,13 @@ def build_html(
     <button id="toggle-controls" class="btn" title="Collapse">–</button>
   </div>
   <div id="controls-body">
+  
+  <!-- Search Bar -->
+  <div class="search-container">
+    <input type="text" id="operator-search" placeholder="🔍 Search by operator name..." autocomplete="off">
+    <div id="search-results-info"></div>
+  </div>
+  
   <div class="section-title">Techno & Legend</div>
   <div class="subtle"><em>By default, no sites are shown. Select a techno below (statuses are {('preselected' if preselect_status_all else 'not preselected')}). Toggle categories to visualize site locations.</em></div>
 
@@ -1585,6 +1599,99 @@ def build_html(
   
   // Initial count
   updateVisibleCount();
+  
+  // ========== SEARCH FUNCTIONALITY ==========
+  const searchInput = document.getElementById('operator-search');
+  const searchResultsInfo = document.getElementById('search-results-info');
+  let searchActive = false;
+  let matchingMarkers = [];
+  
+  function performSearch() {{
+    const query = searchInput.value.trim().toLowerCase();
+    
+    if (query === '') {{
+      // Clear search - restore normal filtering
+      searchActive = false;
+      matchingMarkers = [];
+      searchResultsInfo.textContent = '';
+      applyFilters();
+      return;
+    }}
+    
+    // Search for matching operators
+    searchActive = true;
+    matchingMarkers = allMarkers.filter(m => {{
+      const operator = (m._props.operator || '').toLowerCase();
+      return operator.includes(query);
+    }});
+    
+    // Update info
+    const count = matchingMarkers.length;
+    if (count === 0) {{
+      searchResultsInfo.innerHTML = '❌ No sites found';
+      searchResultsInfo.style.color = '#d32f2f';
+    }} else {{
+      // Get unique operators
+      const operators = [...new Set(matchingMarkers.map(m => m._props.operator))].filter(o => o && o !== 'N/A');
+      const operatorCount = operators.length;
+      searchResultsInfo.innerHTML = `✅ Found ${{count}} site(s) from ${{operatorCount}} operator(s)`;
+      searchResultsInfo.style.color = '#1b5e20';
+    }}
+    
+    // Show matching sites
+    allMarkers.forEach(m => {{
+      const matches = matchingMarkers.includes(m);
+      if (matches) {{
+        if (!markersLayer.hasLayer(m)) {{
+          markersLayer.addLayer(m);
+        }}
+        // Add highlight animation
+        const element = m.getElement ? m.getElement() : m._icon;
+        if (element) {{
+          element.classList.add('search-highlight');
+          setTimeout(() => element.classList.remove('search-highlight'), 500);
+        }}
+      }} else {{
+        if (markersLayer.hasLayer(m)) {{
+          markersLayer.removeLayer(m);
+        }}
+      }}
+    }});
+    
+    updateVisibleCount();
+    
+    // Zoom to matching markers if found
+    if (matchingMarkers.length > 0) {{
+      const group = L.featureGroup(matchingMarkers);
+      map.fitBounds(group.getBounds().pad(0.1));
+    }}
+  }}
+  
+  // Search on input (with debouncing for better performance)
+  let searchTimeout;
+  searchInput.addEventListener('input', () => {{
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(performSearch, 300);
+  }});
+  
+  // Clear search when clicking outside or pressing Escape
+  searchInput.addEventListener('keydown', (e) => {{
+    if (e.key === 'Escape') {{
+      searchInput.value = '';
+      performSearch();
+    }}
+  }});
+  
+  // Modify applyFilters to respect search mode
+  const originalApplyFilters = applyFilters;
+  applyFilters = function() {{
+    if (searchActive) {{
+      // In search mode, don't apply normal filters
+      return;
+    }}
+    originalApplyFilters();
+  }};
+  // ========== END SEARCH FUNCTIONALITY ==========
   
   // Initialize collapsible sections to be collapsed by default
   ['opportunity', 'supply', 'offtake', 'competitors'].forEach(section => {{
