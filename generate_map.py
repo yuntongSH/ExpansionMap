@@ -144,7 +144,12 @@ def build_html(
   .group-title {{ font-weight: 600; margin: 8px 0 4px; font-size: 13px; color: #333; }}
   .section-title {{ font-weight: 700; margin: 6px 0 4px; font-size: 14px; }}
   .layer-section {{ border: 2px solid #ddd; border-radius: 8px; padding: 12px; margin: 12px 0; background: #fafafa; box-shadow: 0 1px 4px rgba(0,0,0,0.1); }}
-  .layer-section-title {{ font-weight: 700; font-size: 17px; color: #222; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 2px solid #ccc; text-transform: uppercase; letter-spacing: 0.5px; }}
+  .layer-section-title {{ font-weight: 700; font-size: 17px; color: #222; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 2px solid #ccc; text-transform: uppercase; letter-spacing: 0.5px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none; }}
+  .layer-section-title:hover {{ opacity: 0.8; }}
+  .dropdown-arrow {{ font-size: 18px; transition: transform 0.3s ease; display: inline-block; font-weight: bold; }}
+  .dropdown-arrow.collapsed {{ transform: rotate(-90deg); }}
+  .layer-section-content {{ overflow: hidden; transition: max-height 0.3s ease; }}
+  .layer-section-content.collapsed {{ max-height: 0 !important; }}
   .layer-supply {{ border-color: #00143B; background: linear-gradient(135deg, #f0f4ff 0%, #e6eeff 100%); }}
   .layer-supply .layer-section-title {{ color: #00143B; border-bottom-color: #00143B; }}
   .layer-offtake {{ border-color: #D18F41; background: linear-gradient(135deg, #fff8ef 0%, #fff1e0 100%); }}
@@ -208,7 +213,11 @@ def build_html(
   <div class="subtle"><em>By default, no sites are shown. Select a techno below (statuses are {('preselected' if preselect_status_all else 'not preselected')}). Toggle categories to visualize site locations.</em></div>
 
   <div class="layer-section layer-opportunity">
-    <div class="layer-section-title">🎯 Opportunity Zones</div>
+    <div class="layer-section-title" onclick="toggleSection('opportunity')">
+      <span>🎯 Opportunity Zones</span>
+      <span class="dropdown-arrow" id="opportunity-arrow">▼</span>
+    </div>
+    <div class="layer-section-content" id="opportunity-content">
     
     <!-- Supply Heatmap (parent) -->
     <div class="heatmap-control">
@@ -309,33 +318,49 @@ def build_html(
     <div class="opportunity-note">
       <strong>💡 Opportunity zones:</strong> Areas with high supply + high offtake but low competitors
     </div>
+    </div>
   </div>
 
   <div class="layer-section layer-supply">
-    <div class="layer-section-title">Supply</div>
-    <div class="btns">
-      <button id="supply-all" class="btn">Select All Supply</button>
-      <button id="supply-none" class="btn">Clear All Supply</button>
+    <div class="layer-section-title" onclick="toggleSection('supply')">
+      <span>Supply</span>
+      <span class="dropdown-arrow" id="supply-arrow">▼</span>
     </div>
-    <div id="layer-supply-content"></div>
+    <div class="layer-section-content" id="supply-content">
+      <div class="btns">
+        <button id="supply-all" class="btn">Select All</button>
+        <button id="supply-none" class="btn">Clear All</button>
+      </div>
+      <div id="layer-supply-content"></div>
+    </div>
   </div>
 
   <div class="layer-section layer-offtake">
-    <div class="layer-section-title">Offtake</div>
-    <div class="btns">
-      <button id="offtake-all" class="btn">Select All Offtake</button>
-      <button id="offtake-none" class="btn">Clear All Offtake</button>
+    <div class="layer-section-title" onclick="toggleSection('offtake')">
+      <span>Offtake</span>
+      <span class="dropdown-arrow" id="offtake-arrow">▼</span>
     </div>
-    <div id="layer-offtake-content"></div>
+    <div class="layer-section-content" id="offtake-content">
+      <div class="btns">
+        <button id="offtake-all" class="btn">Select All</button>
+        <button id="offtake-none" class="btn">Clear All</button>
+      </div>
+      <div id="layer-offtake-content"></div>
+    </div>
   </div>
 
   <div class="layer-section layer-competitors">
-    <div class="layer-section-title">Competitors</div>
-    <div class="btns">
-      <button id="competitors-all" class="btn">Select All Competitors</button>
-      <button id="competitors-none" class="btn">Clear All Competitors</button>
+    <div class="layer-section-title" onclick="toggleSection('competitors')">
+      <span>Competitors</span>
+      <span class="dropdown-arrow" id="competitors-arrow">▼</span>
     </div>
-    <div id="layer-competitors-content"></div>
+    <div class="layer-section-content" id="competitors-content">
+      <div class="btns">
+        <button id="competitors-all" class="btn">Select All</button>
+        <button id="competitors-none" class="btn">Clear All</button>
+      </div>
+      <div id="layer-competitors-content"></div>
+    </div>
   </div>
 
   <div class="divider"></div>
@@ -660,6 +685,22 @@ def build_html(
 
   function updateVisibleCount() {{
     document.getElementById('visible-count').textContent = markersLayer.getLayers().length;
+  }}
+
+  // Toggle collapsible sections
+  function toggleSection(sectionName) {{
+    const content = document.getElementById(`${{sectionName}}-content`);
+    const arrow = document.getElementById(`${{sectionName}}-arrow`);
+    
+    if (content.classList.contains('collapsed')) {{
+      content.classList.remove('collapsed');
+      arrow.classList.remove('collapsed');
+      content.style.maxHeight = content.scrollHeight + 'px';
+    }} else {{
+      content.classList.add('collapsed');
+      arrow.classList.add('collapsed');
+      content.style.maxHeight = '0';
+    }}
   }}
 
   function applyFilters() {{
@@ -1367,6 +1408,17 @@ def build_html(
   
   // Initial count
   updateVisibleCount();
+  
+  // Initialize collapsible sections to be collapsed by default
+  ['opportunity', 'supply', 'offtake', 'competitors'].forEach(section => {{
+    const content = document.getElementById(`${{section}}-content`);
+    const arrow = document.getElementById(`${{section}}-arrow`);
+    if (content && arrow) {{
+      content.classList.add('collapsed');
+      arrow.classList.add('collapsed');
+      content.style.maxHeight = '0';
+    }}
+  }});
   
   // Create isochrone toggle button
   const isochroneToggle = document.createElement('div');
