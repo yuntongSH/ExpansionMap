@@ -186,9 +186,30 @@ def compute_opportunity_points(supply_points, offtake_points, competitors_points
     # Amplify mid-range values to boost contrast and make zones more vivid
     opportunity_grid = np.power(opportunity_grid, 0.8)
     
+    # Boost color contrast: exaggerate higher values by raising upper tail
+    opportunity_grid = np.power(opportunity_grid, 0.6)
+    
+    # Renormalize again after contrast boost
+    max_val = opportunity_grid.max()
+    if max_val > 0:
+        opportunity_grid = opportunity_grid / max_val
+    
     # Remove background noise: clip values below 5% threshold to zero
     threshold = 0.05
     opportunity_grid[opportunity_grid < threshold] = 0
+    
+    # --- 🔧 FINAL CONTRAST & SCALING BOOST ---
+    # Force top intensities to reach orange/red range in gradient
+    # 1️⃣ Boost top intensities non-linearly (brighten the top end even more)
+    opportunity_grid = np.power(opportunity_grid, 0.5)
+    
+    # 2️⃣ Stretch values so the map actually reaches red (multiply by gain factor)
+    opportunity_grid *= 1.8
+    opportunity_grid = np.clip(opportunity_grid, 0, 1)  # cap to [0,1] range
+    
+    # 3️⃣ Optional: re-normalize if needed (commented out to preserve the stretch)
+    # opportunity_grid /= opportunity_grid.max()
+    # --- END FINAL BOOST ---
     # >>> END CONTRAST ENHANCEMENT <<<
     
     # Convert to list of [lat, lon, value] for non-zero cells
@@ -923,9 +944,11 @@ def build_html(
 
   // >>> OPPORTUNITY HEATMAP ADDITION <<<
   // Opportunity Heatmap (composite: supply + offtake - competitors)
-  // Vivid color gradient with strong contrast for clear visualization
-  // Power 0.8 amplifies mid-range values to make moderate zones bright and visible
+  // Adjusted gradient: red appears sooner to match boosted contrast (power 0.5 + 1.8x gain)
+  // Orange and red zones now trigger at lower thresholds for better visibility
   document.getElementById('toggle-opportunity-heat').addEventListener('change', (e) => {{
+    const opportunityLegend = document.getElementById('opportunity-legend');
+    
     if (heatmaps.opportunity) {{
       map.removeLayer(heatmaps.opportunity);
       heatmaps.opportunity = null;
@@ -938,16 +961,18 @@ def build_html(
         max: 1.0,             // Fixed max for consistent color mapping
         gradient: {{
           0.0: 'rgba(0,0,0,0)',  // Fully transparent background
-          0.15: '#00FF00',       // Vivid green for mild zones
-          0.35: '#FFFF00',       // Bright yellow
-          0.55: '#FFA500',       // Strong orange
-          0.75: '#FF4500',       // Dark orange-red
-          1.0: '#8B0000'         // Deep red (maximum opportunity)
+          0.25: '#ADFF2F',       // Yellow-green (mild opportunity appears sooner)
+          0.45: '#FFFF00',       // Bright yellow (moderate)
+          0.6: '#FFA500',        // Orange appears sooner (good opportunity)
+          0.75: '#FF4500',       // Red-orange (high opportunity)
+          1.0: '#FF0000'         // Pure red (maximum opportunity)
         }}
       }});
       heatmaps.opportunity.addTo(map);
+      if (opportunityLegend) opportunityLegend.style.display = 'block';
       console.log(`🎯 Opportunity heatmap enabled (${{OPPORTUNITY_POINTS.length}} cells)`);
     }} else {{
+      if (opportunityLegend) opportunityLegend.style.display = 'none';
       console.log('🎯 Opportunity heatmap disabled');
     }}
   }});
@@ -1649,6 +1674,49 @@ def build_html(
     </div>
   `;
   document.body.appendChild(isochroneLegend);
+  
+  // Create opportunity heatmap legend
+  const opportunityLegend = document.createElement('div');
+  opportunityLegend.id = 'opportunity-legend';
+  opportunityLegend.style.cssText = `
+    position: absolute;
+    bottom: 20px;
+    right: 20px;
+    z-index: 1000;
+    background: rgba(255, 255, 255, 0.95);
+    padding: 15px;
+    border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+    font-size: 13px;
+    min-width: 200px;
+    display: none;
+    border: 2px solid #00AA00;
+  `;
+  opportunityLegend.innerHTML = `
+    <div style="font-weight: 700; font-size: 15px; color: #00AA00; margin-bottom: 10px; border-bottom: 2px solid #00AA00; padding-bottom: 5px;">
+      🎯 Opportunity Zones
+    </div>
+    <div style="display: flex; align-items: center; gap: 10px; margin: 8px 0;">
+      <div style="width: 20px; height: 20px; background: #ADFF2F; border: 2px solid #9ACD32; border-radius: 50%;"></div>
+      <div>Mild Opportunity</div>
+    </div>
+    <div style="display: flex; align-items: center; gap: 10px; margin: 8px 0;">
+      <div style="width: 20px; height: 20px; background: #FFFF00; border: 2px solid #CCCC00; border-radius: 50%;"></div>
+      <div>Moderate Opportunity</div>
+    </div>
+    <div style="display: flex; align-items: center; gap: 10px; margin: 8px 0;">
+      <div style="width: 20px; height: 20px; background: #FFA500; border: 2px solid #CC8400; border-radius: 50%;"></div>
+      <div>Good Opportunity</div>
+    </div>
+    <div style="display: flex; align-items: center; gap: 10px; margin: 8px 0;">
+      <div style="width: 20px; height: 20px; background: #FF0000; border: 2px solid #CC0000; border-radius: 50%;"></div>
+      <div><strong>High Opportunity</strong></div>
+    </div>
+    <div style="margin-top: 10px; padding-top: 8px; border-top: 1px solid #ddd; font-size: 11px; color: #666; font-style: italic;">
+      <span style="font-size: 10px;">Supply + Offtake - Competitors</span>
+    </div>
+  `;
+  document.body.appendChild(opportunityLegend);
 </script>
 </body>
 </html>
