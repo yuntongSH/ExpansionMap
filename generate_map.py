@@ -100,6 +100,112 @@ def make_scaler(values, r_min=5, r_max=16):
     return scale
 
 
+### >>> OPPORTUNITY HEATMAP ADDITION <<<
+def compute_opportunity_points(supply_points, offtake_points, competitors_points):
+    """
+    Compute opportunity heatmap points based on supply + offtake - competitors density.
+    
+    Args:
+        supply_points: List of [lat, lon, weight] for supply sites
+        offtake_points: List of [lat, lon, weight] for offtake sites
+        competitors_points: List of [lat, lon, weight] for competitor sites
+    
+    Returns:
+        List of [lat_center, lon_center, value] for non-zero opportunity cells
+    """
+    if not supply_points and not offtake_points:
+        return []
+    
+    # Grid resolution: ~0.15 degrees (~15 km at mid-latitudes) - denser grid for more detail
+    GRID_SIZE = 0.15
+    
+    # Combine all points to determine bounds
+    all_points = supply_points + offtake_points + competitors_points
+    if not all_points:
+        return []
+    
+    lats = [p[0] for p in all_points]
+    lons = [p[1] for p in all_points]
+    min_lat, max_lat = min(lats), max(lats)
+    min_lon, max_lon = min(lons), max(lons)
+    
+    # Add padding
+    min_lat -= GRID_SIZE
+    max_lat += GRID_SIZE
+    min_lon -= GRID_SIZE
+    max_lon += GRID_SIZE
+    
+    # Create grid
+    lat_bins = np.arange(min_lat, max_lat + GRID_SIZE, GRID_SIZE)
+    lon_bins = np.arange(min_lon, max_lon + GRID_SIZE, GRID_SIZE)
+    
+    # Initialize density grids
+    supply_grid = np.zeros((len(lat_bins)-1, len(lon_bins)-1))
+    offtake_grid = np.zeros((len(lat_bins)-1, len(lon_bins)-1))
+    competitors_grid = np.zeros((len(lat_bins)-1, len(lon_bins)-1))
+    
+    # Helper to bin points into grid
+    def bin_points(points, grid):
+        for lat, lon, weight in points:
+            lat_idx = int((lat - min_lat) / GRID_SIZE)
+            lon_idx = int((lon - min_lon) / GRID_SIZE)
+            if 0 <= lat_idx < grid.shape[0] and 0 <= lon_idx < grid.shape[1]:
+                grid[lat_idx, lon_idx] += weight
+    
+    # Bin all point sets
+    bin_points(supply_points, supply_grid)
+    bin_points(offtake_points, offtake_grid)
+    bin_points(competitors_points, competitors_grid)
+    
+    # Normalize each grid to 0-1 range
+    def normalize_grid(grid):
+        max_val = grid.max()
+        if max_val > 0:
+            return grid / max_val
+        return grid
+    
+    supply_norm = normalize_grid(supply_grid)
+    offtake_norm = normalize_grid(offtake_grid)
+    competitors_norm = normalize_grid(competitors_grid)
+    
+    # Compute opportunity: supply + offtake - competitors
+    opportunity_grid = supply_norm + offtake_norm - competitors_norm
+    
+    # Clip negative values to 0
+    opportunity_grid = np.maximum(opportunity_grid, 0)
+    
+    # >>> CONTRAST ENHANCEMENT: Apply power transform for better visibility <<<
+    # Apply moderate power transform (1.3) to emphasize high-opportunity areas while keeping more zones visible
+    opportunity_grid = np.power(opportunity_grid, 1.3)
+    
+    # Renormalize to 0-1 range after power transform
+    max_val = opportunity_grid.max()
+    if max_val > 0:
+        opportunity_grid = opportunity_grid / max_val
+    
+    # Amplify mid-range values to boost contrast and make zones more vivid
+    opportunity_grid = np.power(opportunity_grid, 0.8)
+    
+    # Remove background noise: clip values below 5% threshold to zero
+    threshold = 0.05
+    opportunity_grid[opportunity_grid < threshold] = 0
+    # >>> END CONTRAST ENHANCEMENT <<<
+    
+    # Convert to list of [lat, lon, value] for non-zero cells
+    result = []
+    for i in range(opportunity_grid.shape[0]):
+        for j in range(opportunity_grid.shape[1]):
+            value = opportunity_grid[i, j]
+            if value > 0:
+                # Cell center coordinates
+                lat_center = min_lat + (i + 0.5) * GRID_SIZE
+                lon_center = min_lon + (j + 0.5) * GRID_SIZE
+                result.append([lat_center, lon_center, float(value)])
+    
+    return result
+### <<< END OPPORTUNITY HEATMAP ADDITION <<<
+
+
 def build_html(
     site_data,
     color_map,
@@ -110,6 +216,7 @@ def build_html(
     supply_points,
     offtake_points,
     competitors_points,
+    opportunity_points,  # >>> OPPORTUNITY HEATMAP ADDITION <<<
     preselect_status_all: bool,
     preselect_techno_all: bool,
     visibility_mode: str,
@@ -218,6 +325,17 @@ def build_html(
       <span class="dropdown-arrow" id="opportunity-arrow">▼</span>
     </div>
     <div class="layer-section-content" id="opportunity-content">
+    
+    <!-- >>> OPPORTUNITY HEATMAP ADDITION <<< -->
+    <!-- Opportunity Heatmap (composite: supply + offtake - competitors) -->
+    <div class="heatmap-control">
+      <label class="heatmap-label" for="toggle-opportunity-heat">
+        <div class="heatmap-indicator" style="background: linear-gradient(135deg, lime 0%, yellow 40%, orange 70%, red 100%);"></div>
+        <span>Opportunity Heatmap</span>
+      </label>
+      <input type="checkbox" id="toggle-opportunity-heat">
+    </div>
+    <!-- <<< END OPPORTUNITY HEATMAP ADDITION >>> -->
     
     <!-- Supply Heatmap (parent) -->
     <div class="heatmap-control">
@@ -397,6 +515,7 @@ def build_html(
   const SITES = {json.dumps(site_data)};
   const TECHNO_COLORS = {json.dumps(color_map)};
   const LAYER_CATEGORY_MAP = {json.dumps(layer_category_map)};
+  const OPPORTUNITY_POINTS = {json.dumps(opportunity_points or [])};  // >>> OPPORTUNITY HEATMAP ADDITION <<<
 
   const map = L.map('map', {{ zoomControl: true }});
   // Use CartoDB Light (light gray background) for a clean, uniform appearance
@@ -766,6 +885,7 @@ def build_html(
 
   // Individual heatmap layers
   const heatmaps = {{
+    opportunity: null,  // >>> OPPORTUNITY HEATMAP ADDITION <<<
     biomethane: null,
     biogas: null,
     foodprocessing: null,
@@ -800,6 +920,38 @@ def build_html(
   
   // Competitors gradient
   const competitorsGradient = {{0.2: 'cyan', 0.4: 'deepskyblue', 0.6: 'blue', 0.8: 'darkblue', 1.0: 'purple'}};
+
+  // >>> OPPORTUNITY HEATMAP ADDITION <<<
+  // Opportunity Heatmap (composite: supply + offtake - competitors)
+  // Vivid color gradient with strong contrast for clear visualization
+  // Power 0.8 amplifies mid-range values to make moderate zones bright and visible
+  document.getElementById('toggle-opportunity-heat').addEventListener('change', (e) => {{
+    if (heatmaps.opportunity) {{
+      map.removeLayer(heatmaps.opportunity);
+      heatmaps.opportunity = null;
+    }}
+    if (e.target.checked) {{
+      heatmaps.opportunity = L.heatLayer(OPPORTUNITY_POINTS, {{
+        radius: 26,           // Slightly larger coverage for visible zones
+        blur: 9,              // Crisper definition of peaks
+        maxZoom: 12,
+        max: 1.0,             // Fixed max for consistent color mapping
+        gradient: {{
+          0.0: 'rgba(0,0,0,0)',  // Fully transparent background
+          0.15: '#00FF00',       // Vivid green for mild zones
+          0.35: '#FFFF00',       // Bright yellow
+          0.55: '#FFA500',       // Strong orange
+          0.75: '#FF4500',       // Dark orange-red
+          1.0: '#8B0000'         // Deep red (maximum opportunity)
+        }}
+      }});
+      heatmaps.opportunity.addTo(map);
+      console.log(`🎯 Opportunity heatmap enabled (${{OPPORTUNITY_POINTS.length}} cells)`);
+    }} else {{
+      console.log('🎯 Opportunity heatmap disabled');
+    }}
+  }});
+  // <<< END OPPORTUNITY HEATMAP ADDITION >>>
 
   // Supply Heatmap parent toggle
   document.getElementById('toggle-supply-heat').addEventListener('change', (e) => {{
@@ -1785,6 +1937,14 @@ def main():
     offtake_points = [[s["lat"], s["lon"], 1] for s in site_data if s["layer"] == "Offtake"]
     competitors_points = [[s["lat"], s["lon"], 1] for s in site_data if s["layer"] == "Competitors"]
 
+    ### >>> OPPORTUNITY HEATMAP ADDITION <<<
+    # Compute opportunity heatmap: supply + offtake - competitors
+    opportunity_points = compute_opportunity_points(
+        supply_points, offtake_points, competitors_points
+    )
+    print(f"Computed {len(opportunity_points)} opportunity heatmap cells")
+    ### <<< END OPPORTUNITY HEATMAP ADDITION <<<
+
     # Bounds
     min_lat, max_lat = float(df[lat_col].min()), float(df[lat_col].max())
     min_lon, max_lon = float(df[lon_col].min()), float(df[lon_col].max())
@@ -1799,6 +1959,7 @@ def main():
         supply_points=supply_points,
         offtake_points=offtake_points,
         competitors_points=competitors_points,
+        opportunity_points=opportunity_points,  # >>> OPPORTUNITY HEATMAP ADDITION <<<
         preselect_status_all=(args.preselect_status == "all"),
         preselect_techno_all=(args.preselect_techno == "all"),
         visibility_mode=args.visibility_mode,
