@@ -1190,27 +1190,25 @@ def build_html(
     
     console.log(`🚛 Fetching truck isochrones for: [${{lat}}, ${{lon}}], times: ${{timeMinutesArray.join(', ')}}min`);
     
-    // Use CORS proxy to avoid CORS issues when opening from file://
-    const corsProxy = 'https://corsproxy.io/?';
-    const apiUrl = `https://api.openrouteservice.org/v2/isochrones/driving-hgv?api_key=${{ORS_API_KEY}}`;
-    const url = corsProxy + encodeURIComponent(apiUrl);
+    const apiUrl = `https://api.openrouteservice.org/v2/isochrones/driving-hgv`;
     
     const body = {{
       locations: [[lon, lat]], // ORS uses [lon, lat] order
       range: timeMinutesArray.map(m => m * 60) // Convert minutes to seconds
     }};
     
-    console.log(`📤 Using CORS proxy...`);
     console.log(`📤 Request body: ${{JSON.stringify(body)}}`);
     
+    // Try direct API call first (works when served via HTTP/HTTPS)
     try {{
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
       
       const startTime = Date.now();
-      const response = await fetch(url, {{
+      const response = await fetch(apiUrl, {{
         method: 'POST',
         headers: {{
+          'Authorization': ORS_API_KEY,
           'Content-Type': 'application/json',
           'Accept': 'application/json, application/geo+json'
         }},
@@ -1234,8 +1232,58 @@ def build_html(
       console.log(`✅ Truck isochrones received (${{elapsed}}ms), features: ${{data.features ? data.features.length : 0}}`);
       return data;
     }} catch (error) {{
+      // If direct call fails (likely CORS from file://), try with CORS proxy
+      if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {{
+        console.warn(`⚠️ Direct API call failed (likely CORS), trying with proxy...`);
+        return await fetchWithProxy(apiUrl, body);
+      }}
       console.error(`❌ Exception fetching isochrones:`, error);
       console.error(`   Error: ${{error.message}}`);
+      return null;
+    }}
+  }}
+  
+  // Fallback: Fetch via CORS proxy (for file:// protocol)
+  async function fetchWithProxy(apiUrl, body) {{
+    try {{
+      const corsProxy = 'https://corsproxy.io/?';
+      // Construct full URL with API key as query parameter for proxy
+      const urlWithKey = `${{apiUrl}}?api_key=${{ORS_API_KEY}}`;
+      const proxyUrl = corsProxy + encodeURIComponent(urlWithKey);
+      
+      console.log(`📤 Using CORS proxy...`);
+      
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
+      
+      const startTime = Date.now();
+      const response = await fetch(proxyUrl, {{
+        method: 'POST',
+        headers: {{
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        }},
+        body: JSON.stringify(body),
+        signal: controller.signal
+      }});
+      
+      clearTimeout(timeoutId);
+      const elapsed = Date.now() - startTime;
+      
+      console.log(`📥 Proxy response status: ${{response.status}} ${{response.statusText}} (${{elapsed}}ms)`);
+      
+      if (!response.ok) {{
+        const errorText = await response.text();
+        console.error(`❌ Proxy API error: HTTP ${{response.status}}`);
+        console.error(`   Response:`, errorText);
+        return null;
+      }}
+      
+      const data = await response.json();
+      console.log(`✅ Isochrones via proxy (${{elapsed}}ms), features: ${{data.features ? data.features.length : 0}}`);
+      return data;
+    }} catch (error) {{
+      console.error(`❌ Proxy fetch failed:`, error);
       return null;
     }}
   }}
