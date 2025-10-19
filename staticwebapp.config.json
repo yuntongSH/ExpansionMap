@@ -1,0 +1,24 @@
+{
+  "routes": [
+    {
+      "route": "/",
+      "serve": "/BioCO2 Expansion Map 2025.html"
+    }
+  ],
+  "navigationFallback": {
+    "rewrite": "/BioCO2 Expansion Map 2025.html"
+  },
+  "mimeTypes": {
+    ".html": "text/html",
+    ".css": "text/css",
+    ".js": "application/javascript",
+    ".json": "application/json",
+    ".csv": "text/csv",
+    ".md": "text/markdown"
+  },
+  "globalHeaders": {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization"
+  }
+}
