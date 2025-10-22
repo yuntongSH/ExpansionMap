@@ -238,6 +238,8 @@ def build_html(
     offtake_points,
     competitors_points,
     opportunity_points,  # >>> OPPORTUNITY HEATMAP ADDITION <<<
+    grid_nodes,  # >>> ELECTRICITY NETWORK ADDITION <<<
+    grid_edges,  # >>> ELECTRICITY NETWORK ADDITION <<<
     preselect_status_all: bool,
     preselect_techno_all: bool,
     visibility_mode: str,
@@ -290,6 +292,8 @@ def build_html(
   .layer-eiffel .layer-section-title {{ color: #F57C00; border-bottom-color: #FFD700; }}
   .layer-status {{ border-color: #607D8B; background: linear-gradient(135deg, #f5f7f8 0%, #eceff1 100%); }}
   .layer-status .layer-section-title {{ color: #37474F; border-bottom-color: #607D8B; }}
+  .layer-grid {{ border-color: #FF9800; background: linear-gradient(135deg, #fff3e0 0%, #ffe0b2 100%); }}
+  .layer-grid .layer-section-title {{ color: #E65100; border-bottom-color: #FF9800; }}
   .heatmap-control {{ display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; margin: 6px 0; background: white; border-radius: 6px; border: 1px solid #ddd; box-shadow: 0 1px 3px rgba(0,0,0,0.1); transition: all 0.2s; }}
   .heatmap-control:hover {{ box-shadow: 0 2px 6px rgba(0,0,0,0.15); transform: translateY(-1px); }}
   .heatmap-control input[type="checkbox"] {{ width: 18px; height: 18px; cursor: pointer; }}
@@ -538,6 +542,23 @@ def build_html(
 
   <div class="divider"></div>
 
+  <div class="layer-section layer-grid">
+    <div class="layer-section-title" onclick="toggleSection('grid')">
+      <span>⚡ Electricity Network</span>
+      <span class="dropdown-arrow" id="grid-arrow">▼</span>
+    </div>
+    <div class="layer-section-content" id="grid-content">
+      <div class="btns">
+        <button id="toggle-grid" class="btn">Toggle Grid</button>
+      </div>
+      <div style="font-size: 12px; color: #666; margin-top: 6px; padding: 0 10px;">
+        ENTSO-E transmission network (nodes and edges)
+      </div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
   <div class="counter"><span id="visible-count">0</span> site(s) visible</div>
   <div class="note">Tip: Visibility rule = <b>{visibility_mode}</b>. Heatmaps are independent overlays.</div>
   </div>
@@ -551,6 +572,8 @@ def build_html(
   const TECHNO_COLORS = {json.dumps(color_map)};
   const LAYER_CATEGORY_MAP = {json.dumps(layer_category_map)};
   const OPPORTUNITY_POINTS = {json.dumps(opportunity_points or [])};  // >>> OPPORTUNITY HEATMAP ADDITION <<<
+  const GRID_NODES = {json.dumps(grid_nodes or [])};  // >>> ELECTRICITY NETWORK ADDITION <<<
+  const GRID_EDGES = {json.dumps(grid_edges or [])};  // >>> ELECTRICITY NETWORK ADDITION <<<
 
   const map = L.map('map', {{ zoomControl: true }});
   // Use CartoDB Light (light gray background) for a clean, uniform appearance
@@ -830,6 +853,106 @@ def build_html(
   document.getElementById('offtake-none').onclick = () => {{ setChecked('#layer-offtake-content input', false); applyFilters(); }};
   document.getElementById('competitors-all').onclick = () => {{ setChecked('#layer-competitors-content input', true); applyFilters(); }};
   document.getElementById('competitors-none').onclick = () => {{ setChecked('#layer-competitors-content input', false); applyFilters(); }};
+
+  // >>> ELECTRICITY NETWORK ADDITION <<<
+  // Electricity Grid Toggle
+  let gridLayerGroup = null;
+  let gridVisible = false;
+  
+  function createGridLayer() {{
+    try {{
+      console.log(`🔧 Creating grid layer with ${{GRID_NODES.length}} nodes and ${{GRID_EDGES.length}} edges...`);
+      const layerGroup = L.layerGroup();
+      
+      // Add edges (transmission lines)
+      let edgeCount = 0;
+      GRID_EDGES.forEach(edge => {{
+        try {{
+          const line = L.polyline(
+            [[edge.start_lat, edge.start_lon], [edge.end_lat, edge.end_lon]],
+            {{
+              color: '#FF6B00',
+              weight: 1.5,
+              opacity: 0.6,
+              interactive: true
+            }}
+          );
+          line.bindPopup(`<b>Transmission Line</b><br>${{edge.symbol}}`);
+          layerGroup.addLayer(line);
+          edgeCount++;
+        }} catch (err) {{
+          console.error('Error creating edge:', err, edge);
+        }}
+      }});
+      console.log(`✅ Added ${{edgeCount}} transmission lines`);
+      
+      // Add nodes (substations, power plants)
+      let nodeCount = 0;
+      GRID_NODES.forEach(node => {{
+        try {{
+          const nodeColor = node.symbol.includes('Hydro') ? '#2196F3' : '#FF9800';
+          const nodeSize = node.symbol.includes('Hydro') ? 4 : 3;
+          
+          const marker = L.circleMarker([node.lat, node.lon], {{
+            radius: nodeSize,
+            color: nodeColor,
+            fillColor: nodeColor,
+            fillOpacity: 0.8,
+            weight: 1
+          }});
+          marker.bindPopup(`<b>${{node.symbol}}</b><br>Lat: ${{node.lat.toFixed(4)}}, Lon: ${{node.lon.toFixed(4)}}`);
+          layerGroup.addLayer(marker);
+          nodeCount++;
+        }} catch (err) {{
+          console.error('Error creating node:', err, node);
+        }}
+      }});
+      console.log(`✅ Added ${{nodeCount}} nodes`);
+      
+      console.log(`✅ Grid layer created successfully`);
+      return layerGroup;
+    }} catch (error) {{
+      console.error('❌ Error in createGridLayer:', error);
+      return null;
+    }}
+  }}
+  
+  const toggleGridBtn = document.getElementById('toggle-grid');
+  console.log('🔍 Toggle grid button:', toggleGridBtn);
+  
+  if (toggleGridBtn) {{
+    toggleGridBtn.addEventListener('click', (e) => {{
+      console.log('🖱️ Grid toggle button clicked!');
+      gridVisible = !gridVisible;
+      e.target.classList.toggle('active', gridVisible);
+      
+      try {{
+        if (gridVisible) {{
+          if (!gridLayerGroup) {{
+            console.log('🔌 Creating electricity grid layer...');
+            gridLayerGroup = createGridLayer();
+            if (!gridLayerGroup) {{
+              console.error('❌ Failed to create grid layer');
+              return;
+            }}
+          }}
+          gridLayerGroup.addTo(map);
+          console.log(`✅ Electricity grid visible (${{GRID_NODES.length}} nodes, ${{GRID_EDGES.length}} edges)`);
+        }} else {{
+          if (gridLayerGroup) {{
+            map.removeLayer(gridLayerGroup);
+          }}
+          console.log('❌ Electricity grid hidden');
+        }}
+      }} catch (error) {{
+        console.error('❌ Error toggling grid:', error);
+      }}
+    }});
+    console.log('✅ Grid toggle button event listener attached');
+  }} else {{
+    console.error('❌ Toggle grid button not found!');
+  }}
+  // <<< END ELECTRICITY NETWORK ADDITION <<<
 
   function getSelected(prefix) {{
     return Array.from(document.querySelectorAll(`input[id^="${{prefix}}-"]`))
@@ -1742,7 +1865,7 @@ def build_html(
   // ========== END SEARCH FUNCTIONALITY ==========
   
   // Initialize collapsible sections to be collapsed by default
-  ['opportunity', 'supply', 'offtake', 'competitors'].forEach(section => {{
+  ['opportunity', 'supply', 'offtake', 'competitors', 'grid'].forEach(section => {{
     const content = document.getElementById(`${{section}}-content`);
     const arrow = document.getElementById(`${{section}}-arrow`);
     if (content && arrow) {{
@@ -2168,6 +2291,39 @@ def main():
     print(f"Computed {len(opportunity_points)} opportunity heatmap cells")
     ### <<< END OPPORTUNITY HEATMAP ADDITION <<<
 
+    ### >>> ELECTRICITY NETWORK ADDITION <<<
+    # Load electricity network nodes and edges
+    grid_nodes = []
+    grid_edges = []
+    try:
+        # Load nodes
+        nodes_df = pd.read_csv("entsoe_Node.csv", encoding="latin-1")
+        for _, row in nodes_df.iterrows():
+            grid_nodes.append({
+                "lat": float(row["lat"]),
+                "lon": float(row["lon"]),
+                "symbol": row.get("Symbol", "Substation")
+            })
+        
+        # Load edges
+        edges_df = pd.read_csv("entsoe_Edge.csv", encoding="latin-1")
+        for _, row in edges_df.iterrows():
+            grid_edges.append({
+                "start_lat": float(row["start_lat"]),
+                "start_lon": float(row["start_lon"]),
+                "end_lat": float(row["end_lat"]),
+                "end_lon": float(row["end_lon"]),
+                "symbol": row.get("Symbol", "Transmission Line")
+            })
+        
+        print(f"Loaded {len(grid_nodes)} electricity grid nodes")
+        print(f"Loaded {len(grid_edges)} electricity grid edges")
+    except Exception as e:
+        print(f"Warning: Could not load electricity network data: {e}")
+        grid_nodes = []
+        grid_edges = []
+    ### <<< END ELECTRICITY NETWORK ADDITION <<<
+
     # Bounds
     min_lat, max_lat = float(df[lat_col].min()), float(df[lat_col].max())
     min_lon, max_lon = float(df[lon_col].min()), float(df[lon_col].max())
@@ -2183,6 +2339,8 @@ def main():
         offtake_points=offtake_points,
         competitors_points=competitors_points,
         opportunity_points=opportunity_points,  # >>> OPPORTUNITY HEATMAP ADDITION <<<
+        grid_nodes=grid_nodes,  # >>> ELECTRICITY NETWORK ADDITION <<<
+        grid_edges=grid_edges,  # >>> ELECTRICITY NETWORK ADDITION <<<
         preselect_status_all=(args.preselect_status == "all"),
         preselect_techno_all=(args.preselect_techno == "all"),
         visibility_mode=args.visibility_mode,
