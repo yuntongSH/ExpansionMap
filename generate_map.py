@@ -240,6 +240,7 @@ def build_html(
     opportunity_points,  # >>> OPPORTUNITY HEATMAP ADDITION <<<
     grid_nodes,  # >>> ELECTRICITY NETWORK ADDITION <<<
     grid_edges,  # >>> ELECTRICITY NETWORK ADDITION <<<
+    gas_pipelines,  # >>> GAS NETWORK ADDITION <<<
     preselect_status_all: bool,
     preselect_techno_all: bool,
     visibility_mode: str,
@@ -294,6 +295,8 @@ def build_html(
   .layer-status .layer-section-title {{ color: #37474F; border-bottom-color: #607D8B; }}
   .layer-grid {{ border-color: #FF9800; background: linear-gradient(135deg, #fff3e0 0%, #ffe0b2 100%); }}
   .layer-grid .layer-section-title {{ color: #E65100; border-bottom-color: #FF9800; }}
+  .layer-gas {{ border-color: #2196F3; background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%); }}
+  .layer-gas .layer-section-title {{ color: #0D47A1; border-bottom-color: #2196F3; }}
   .heatmap-control {{ display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; margin: 6px 0; background: white; border-radius: 6px; border: 1px solid #ddd; box-shadow: 0 1px 3px rgba(0,0,0,0.1); transition: all 0.2s; }}
   .heatmap-control:hover {{ box-shadow: 0 2px 6px rgba(0,0,0,0.15); transform: translateY(-1px); }}
   .heatmap-control input[type="checkbox"] {{ width: 18px; height: 18px; cursor: pointer; }}
@@ -548,14 +551,60 @@ def build_html(
       <span class="dropdown-arrow" id="grid-arrow">▼</span>
     </div>
     <div class="layer-section-content" id="grid-content">
-      <div class="btns">
-        <button id="toggle-grid" class="btn">Toggle Grid</button>
+      <div class="heatmap-control">
+        <label class="heatmap-label" for="toggle-grid">
+          <div class="heatmap-indicator" style="background: linear-gradient(135deg, #4CAF50 0%, #FF9800 100%);"></div>
+          <span>ENTSO-E Transmission System</span>
+        </label>
+        <input type="checkbox" id="toggle-grid">
       </div>
-      <div style="font-size: 12px; color: #666; margin-top: 6px; padding: 0 10px;">
-        ENTSO-E transmission network (nodes and edges)
+      <div style="font-size: 11px; color: #666; margin-top: 6px; padding: 0 10px;">
+        European electricity transmission grid
       </div>
     </div>
   </div>
+
+  <!-- >>> GAS NETWORK ADDITION >>> -->
+  <div class="layer-section layer-gas">
+    <div class="layer-section-title" onclick="toggleSection('gas')">
+      <span>⛽ Gas Network</span>
+      <span class="dropdown-arrow" id="gas-arrow">▼</span>
+    </div>
+    <div class="layer-section-content" id="gas-content">
+      <div class="heatmap-control">
+        <label class="heatmap-label" for="toggle-gas-operating">
+          <div class="heatmap-indicator" style="background: linear-gradient(135deg, #1B5E20 0%, #4A148C 100%);"></div>
+          <span>Operating Pipelines</span>
+        </label>
+        <input type="checkbox" id="toggle-gas-operating">
+      </div>
+      <div class="heatmap-control">
+        <label class="heatmap-label" for="toggle-gas-construction">
+          <div class="heatmap-indicator" style="background: linear-gradient(135deg, #2E7D32 0%, #6A1B9A 100%);"></div>
+          <span>Under Construction</span>
+        </label>
+        <input type="checkbox" id="toggle-gas-construction">
+      </div>
+      <div class="heatmap-control">
+        <label class="heatmap-label" for="toggle-gas-proposed">
+          <div class="heatmap-indicator" style="background: linear-gradient(135deg, #388E3C 0%, #7B1FA2 100%);"></div>
+          <span>Proposed Projects</span>
+        </label>
+        <input type="checkbox" id="toggle-gas-proposed">
+      </div>
+      <div class="heatmap-control">
+        <label class="heatmap-label" for="toggle-gas-other">
+          <div class="heatmap-indicator" style="background: #757575;"></div>
+          <span>Other Status</span>
+        </label>
+        <input type="checkbox" id="toggle-gas-other">
+      </div>
+      <div class="layer-info">
+        European gas transmission network with hydrogen-ready infrastructure
+      </div>
+    </div>
+  </div>
+  <!-- <<< END GAS NETWORK ADDITION <<< -->
 
   <div class="divider"></div>
 
@@ -574,6 +623,7 @@ def build_html(
   const OPPORTUNITY_POINTS = {json.dumps(opportunity_points or [])};  // >>> OPPORTUNITY HEATMAP ADDITION <<<
   const GRID_NODES = {json.dumps(grid_nodes or [])};  // >>> ELECTRICITY NETWORK ADDITION <<<
   const GRID_EDGES = {json.dumps(grid_edges or [])};  // >>> ELECTRICITY NETWORK ADDITION <<<
+  const GAS_PIPELINES = {json.dumps(gas_pipelines or [])};  // >>> GAS NETWORK ADDITION <<<
 
   const map = L.map('map', {{ zoomControl: true }});
   // Use CartoDB Light (light gray background) for a clean, uniform appearance
@@ -859,39 +909,86 @@ def build_html(
   let gridLayerGroup = null;
   let gridVisible = false;
   
+  // Helper function to extract voltage from symbol string
+  function extractVoltage(symbol) {{
+    const match = symbol.match(/(\d+)-(\d+)\s*kV/i) || symbol.match(/(\d+)\s*kV/i);
+    if (match) {{
+      return parseInt(match[1]);
+    }}
+    // Check for specific high voltage patterns
+    if (symbol.includes('380') || symbol.includes('400') || symbol.includes('500') || symbol.includes('700')) {{
+      return 400; // High voltage
+    }}
+    return 150; // Default to medium voltage
+  }}
+  
+  // Color scheme for nodes based on type
+  function getNodeColor(symbol) {{
+    if (symbol.includes('Hydro')) return '#2196F3';  // Blue for hydro
+    if (symbol.includes('Wind')) return '#006660';   // Cyan for wind
+    if (symbol.includes('Solar')) return '#D18F41';  // Amber for solar
+    if (symbol.includes('Nuclear')) return '#9C27B0'; // Purple for nuclear
+    if (symbol.includes('Thermal') || symbol.includes('Gas') || symbol.includes('Coal')) return '#F44336'; // Red for thermal
+    if (symbol.includes('Substation')) return '#FF9800'; // Orange for substations
+    return '#9E9E9E'; // Gray for other/unknown
+  }}
+  
   function createGridLayer() {{
     try {{
       console.log(`🔧 Creating grid layer with ${{GRID_NODES.length}} nodes and ${{GRID_EDGES.length}} edges...`);
       const layerGroup = L.layerGroup();
       
+      // Statistics for legend
+      const stats = {{
+        lowVoltage: 0,
+        highVoltage: 0,
+        nodeTypes: {{}}
+      }};
+      
       // Add edges (transmission lines)
       let edgeCount = 0;
       GRID_EDGES.forEach(edge => {{
         try {{
+          const voltage = extractVoltage(edge.symbol);
+          const isHighVoltage = voltage >= 380;
+          
+          // Color based on voltage: green <380kV, orange ≥380kV
+          const lineColor = isHighVoltage ? '#FF6B00' : '#4CAF50';
+          const lineWeight = isHighVoltage ? 2 : 1.5;
+          
+          if (isHighVoltage) stats.highVoltage++;
+          else stats.lowVoltage++;
+          
           const line = L.polyline(
             [[edge.start_lat, edge.start_lon], [edge.end_lat, edge.end_lon]],
             {{
-              color: '#FF6B00',
-              weight: 1.5,
-              opacity: 0.6,
+              color: lineColor,
+              weight: lineWeight,
+              opacity: 0.7,
               interactive: true
             }}
           );
-          line.bindPopup(`<b>Transmission Line</b><br>${{edge.symbol}}`);
+          line.bindPopup(`<b>Transmission Line</b><br>${{edge.symbol}}<br><b>Voltage:</b> ${{voltage}} kV`);
           layerGroup.addLayer(line);
           edgeCount++;
         }} catch (err) {{
           console.error('Error creating edge:', err, edge);
         }}
       }});
-      console.log(`✅ Added ${{edgeCount}} transmission lines`);
+      console.log(`✅ Added ${{edgeCount}} transmission lines (${{stats.highVoltage}} high voltage, ${{stats.lowVoltage}} medium/low voltage)`);
       
       // Add nodes (substations, power plants)
       let nodeCount = 0;
       GRID_NODES.forEach(node => {{
         try {{
-          const nodeColor = node.symbol.includes('Hydro') ? '#2196F3' : '#FF9800';
-          const nodeSize = node.symbol.includes('Hydro') ? 4 : 3;
+          const nodeColor = getNodeColor(node.symbol);
+          const nodeSize = node.symbol.includes('Hydro') || node.symbol.includes('Nuclear') ? 5 : 3;
+          
+          // Track node types for legend
+          if (!stats.nodeTypes[node.symbol]) {{
+            stats.nodeTypes[node.symbol] = 0;
+          }}
+          stats.nodeTypes[node.symbol]++;
           
           const marker = L.circleMarker([node.lat, node.lon], {{
             radius: nodeSize,
@@ -917,14 +1014,13 @@ def build_html(
     }}
   }}
   
-  const toggleGridBtn = document.getElementById('toggle-grid');
-  console.log('🔍 Toggle grid button:', toggleGridBtn);
+  const toggleGridCheckbox = document.getElementById('toggle-grid');
+  console.log('🔍 Toggle grid checkbox:', toggleGridCheckbox);
   
-  if (toggleGridBtn) {{
-    toggleGridBtn.addEventListener('click', (e) => {{
-      console.log('🖱️ Grid toggle button clicked!');
-      gridVisible = !gridVisible;
-      e.target.classList.toggle('active', gridVisible);
+  if (toggleGridCheckbox) {{
+    toggleGridCheckbox.addEventListener('change', (e) => {{
+      console.log('🖱️ Grid toggle checkbox changed!');
+      gridVisible = e.target.checked;
       
       try {{
         if (gridVisible) {{
@@ -937,22 +1033,224 @@ def build_html(
             }}
           }}
           gridLayerGroup.addTo(map);
+          // Show legend
+          const legend = document.getElementById('grid-legend');
+          if (legend) legend.style.display = 'block';
           console.log(`✅ Electricity grid visible (${{GRID_NODES.length}} nodes, ${{GRID_EDGES.length}} edges)`);
         }} else {{
           if (gridLayerGroup) {{
             map.removeLayer(gridLayerGroup);
           }}
+          // Hide legend
+          const legend = document.getElementById('grid-legend');
+          if (legend) legend.style.display = 'none';
           console.log('❌ Electricity grid hidden');
         }}
       }} catch (error) {{
         console.error('❌ Error toggling grid:', error);
       }}
     }});
-    console.log('✅ Grid toggle button event listener attached');
+    console.log('✅ Grid toggle checkbox event listener attached');
   }} else {{
-    console.error('❌ Toggle grid button not found!');
+    console.error('❌ Toggle grid checkbox not found!');
   }}
   // <<< END ELECTRICITY NETWORK ADDITION <<<
+
+  // >>> GAS NETWORK ADDITION <<<
+  // Gas Network Toggle with separate status controls
+  let gasLayerGroups = {{
+    operating: null,
+    construction: null,
+    proposed: null,
+    other: null
+  }};
+  
+  // Helper function to get pipeline color based on fuel type (dark colors)
+  function getGasPipelineColor(fuel) {{
+    return fuel === 'Hydrogen' ? '#4A148C' : '#1B5E20';  // Dark purple for H2, Dark green for Gas
+  }}
+  
+  // Helper function to categorize pipeline status
+  function getStatusCategory(status) {{
+    if (status === 'operating') return 'operating';
+    if (status === 'construction') return 'construction';
+    if (status === 'proposed') return 'proposed';
+    return 'other';  // cancelled, shelved, mothballed, retired, idle
+  }}
+  
+  function createGasLayerByStatus(statusCategory) {{
+    try {{
+      console.log(`🔧 Creating gas network layer for status: ${{statusCategory}}...`);
+      const layerGroup = L.layerGroup();
+      
+      let pipelineCount = 0;
+      GAS_PIPELINES.forEach(pipeline => {{
+        try {{
+          if (getStatusCategory(pipeline.status) !== statusCategory) return;
+          
+          // Use gray color for "other" status, otherwise use fuel-based color
+          const color = statusCategory === 'other' ? '#757575' : getGasPipelineColor(pipeline.fuel);
+          const weight = statusCategory === 'operating' ? 2.5 : 2;
+          const opacity = statusCategory === 'operating' ? 0.8 : 0.6;
+          const dashArray = statusCategory === 'proposed' ? '8, 4' : null;
+          
+          const line = L.polyline(pipeline.coordinates, {{
+            color: color,
+            weight: weight,
+            opacity: opacity,
+            dashArray: dashArray,
+            interactive: true
+          }});
+          
+          // Build popup content
+          let popupContent = `<div style="max-width: 350px;">`;
+          popupContent += `<b style="font-size: 14px; color: #0D47A1;">${{pipeline.name}}</b>`;
+          if (pipeline.segment && pipeline.segment !== 'N/A') {{
+            popupContent += `<br><i style="color: #666;">${{pipeline.segment}}</i>`;
+          }}
+          popupContent += `<hr style="margin: 8px 0; border: none; border-top: 1px solid #ddd;">`;
+          
+          // Status and Fuel
+          popupContent += `<div style="margin: 6px 0;"><b>Status:</b> ${{pipeline.status}}</div>`;
+          popupContent += `<div style="margin: 6px 0;"><b>Fuel Type:</b> ${{pipeline.fuel}}</div>`;
+          
+          // Countries
+          if (pipeline.countries && pipeline.countries !== 'N/A') {{
+            popupContent += `<div style="margin: 6px 0;"><b>Countries:</b> ${{pipeline.countries}}</div>`;
+          }}
+          
+          // Ownership
+          if (pipeline.owner && pipeline.owner !== 'N/A') {{
+            popupContent += `<div style="margin: 6px 0;"><b>Owner:</b> ${{pipeline.owner}}</div>`;
+          }}
+          if (pipeline.parent && pipeline.parent !== 'N/A') {{
+            popupContent += `<div style="margin: 6px 0;"><b>Parent Company:</b> ${{pipeline.parent}}</div>`;
+          }}
+          
+          // Start Year
+          if (pipeline.start_year && pipeline.start_year !== 'N/A') {{
+            popupContent += `<div style="margin: 6px 0;"><b>Start Year:</b> ${{pipeline.start_year}}</div>`;
+          }}
+          
+          // Capacity
+          if (pipeline.capacity && pipeline.capacity !== 'N/A') {{
+            const capacityUnit = pipeline.capacity_units ? ` ${{pipeline.capacity_units}}` : '';
+            popupContent += `<div style="margin: 6px 0;"><b>Capacity:</b> ${{pipeline.capacity}}${{capacityUnit}}</div>`;
+          }}
+          
+          // Length
+          if (pipeline.length && pipeline.length !== 'N/A') {{
+            popupContent += `<div style="margin: 6px 0;"><b>Length:</b> ${{pipeline.length}} km</div>`;
+          }}
+          
+          // Diameter
+          if (pipeline.diameter && pipeline.diameter !== 'N/A') {{
+            const diameterUnit = pipeline.diameter_units ? ` ${{pipeline.diameter_units}}` : '';
+            popupContent += `<div style="margin: 6px 0;"><b>Diameter:</b> ${{pipeline.diameter}}${{diameterUnit}}</div>`;
+          }}
+          
+          // Fuel Source
+          if (pipeline.fuel_source && pipeline.fuel_source !== 'N/A') {{
+            popupContent += `<div style="margin: 6px 0;"><b>Fuel Source:</b> ${{pipeline.fuel_source}}</div>`;
+          }}
+          
+          // Start Location
+          if (pipeline.start_location && pipeline.start_location !== 'N/A') {{
+            let startText = pipeline.start_location;
+            if (pipeline.start_country && pipeline.start_country !== 'N/A') {{
+              startText += ` (${{pipeline.start_country}})`;
+            }}
+            popupContent += `<div style="margin: 6px 0;"><b>Start Location:</b> ${{startText}}</div>`;
+          }}
+          
+          // End Location
+          if (pipeline.end_location && pipeline.end_location !== 'N/A') {{
+            let endText = pipeline.end_location;
+            if (pipeline.end_country && pipeline.end_country !== 'N/A') {{
+              endText += ` (${{pipeline.end_country}})`;
+            }}
+            popupContent += `<div style="margin: 6px 0;"><b>End Location:</b> ${{endText}}</div>`;
+          }}
+          
+          popupContent += `</div>`;
+          
+          line.bindPopup(popupContent);
+          layerGroup.addLayer(line);
+          pipelineCount++;
+        }} catch (err) {{
+          console.error('Error creating pipeline:', err, pipeline);
+        }}
+      }});
+      console.log(`✅ Added ${{pipelineCount}} gas pipeline segments for ${{statusCategory}}`);
+      
+      return layerGroup;
+    }} catch (error) {{
+      console.error(`❌ Error in createGasLayerByStatus(${{statusCategory}}):`, error);
+      return null;
+    }}
+  }}
+  
+  function toggleGasStatus(statusCategory, checkbox) {{
+    try {{
+      const isChecked = checkbox.checked;
+      console.log(`🖱️ Gas ${{statusCategory}} toggle: ${{isChecked}}`);
+      
+      if (isChecked) {{
+        if (!gasLayerGroups[statusCategory]) {{
+          console.log(`⛽ Creating gas network layer for ${{statusCategory}}...`);
+          gasLayerGroups[statusCategory] = createGasLayerByStatus(statusCategory);
+          if (!gasLayerGroups[statusCategory]) {{
+            console.error(`❌ Failed to create gas layer for ${{statusCategory}}`);
+            return;
+          }}
+        }}
+        gasLayerGroups[statusCategory].addTo(map);
+        console.log(`✅ Gas ${{statusCategory}} pipelines visible`);
+      }} else {{
+        if (gasLayerGroups[statusCategory]) {{
+          map.removeLayer(gasLayerGroups[statusCategory]);
+        }}
+        console.log(`❌ Gas ${{statusCategory}} pipelines hidden`);
+      }}
+      
+      // Update legend visibility
+      updateGasLegendVisibility();
+    }} catch (error) {{
+      console.error(`❌ Error toggling gas ${{statusCategory}}:`, error);
+    }}
+  }}
+  
+  function updateGasLegendVisibility() {{
+    const legend = document.getElementById('gas-legend');
+    if (!legend) return;
+    
+    // Show legend if any gas layer is visible
+    const anyVisible = Object.values(gasLayerGroups).some(layer => layer && map.hasLayer(layer));
+    legend.style.display = anyVisible ? 'block' : 'none';
+  }}
+  
+  // Setup event listeners for all gas status toggles
+  const gasStatusToggles = {{
+    operating: document.getElementById('toggle-gas-operating'),
+    construction: document.getElementById('toggle-gas-construction'),
+    proposed: document.getElementById('toggle-gas-proposed'),
+    other: document.getElementById('toggle-gas-other')
+  }};
+  
+  Object.entries(gasStatusToggles).forEach(([status, checkbox]) => {{
+    if (checkbox) {{
+      checkbox.addEventListener('change', () => toggleGasStatus(status, checkbox));
+      console.log(`✅ Gas ${{status}} toggle event listener attached`);
+      
+      // Initialize if checked by default
+      if (checkbox.checked) {{
+        toggleGasStatus(status, checkbox);
+      }}
+    }} else {{
+      console.error(`❌ Toggle gas ${{status}} checkbox not found!`);
+    }}
+  }});
+  // <<< END GAS NETWORK ADDITION <<<
 
   function getSelected(prefix) {{
     return Array.from(document.querySelectorAll(`input[id^="${{prefix}}-"]`))
@@ -1865,7 +2163,7 @@ def build_html(
   // ========== END SEARCH FUNCTIONALITY ==========
   
   // Initialize collapsible sections to be collapsed by default
-  ['opportunity', 'supply', 'offtake', 'competitors', 'grid'].forEach(section => {{
+  ['opportunity', 'supply', 'offtake', 'competitors', 'grid', 'gas'].forEach(section => {{
     const content = document.getElementById(`${{section}}-content`);
     const arrow = document.getElementById(`${{section}}-arrow`);
     if (content && arrow) {{
@@ -1952,6 +2250,124 @@ def build_html(
     </div>
   `;
   document.body.appendChild(isochroneLegend);
+  
+  // Create grid legend
+  const gridLegend = document.createElement('div');
+  gridLegend.id = 'grid-legend';
+  gridLegend.style.cssText = `
+    position: absolute;
+    bottom: 80px;
+    right: 20px;
+    z-index: 1000;
+    background: rgba(255, 255, 255, 0.95);
+    padding: 15px;
+    border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+    font-size: 13px;
+    min-width: 220px;
+    display: none;
+    border: 2px solid #FF9800;
+  `;
+  gridLegend.innerHTML = `
+    <div style="font-weight: 700; font-size: 15px; color: #E65100; margin-bottom: 10px; border-bottom: 2px solid #FF9800; padding-bottom: 5px;">
+      ⚡ ENTSO-E Transmission Grid
+    </div>
+    <div style="font-weight: 600; font-size: 12px; color: #555; margin: 10px 0 6px 0;">Transmission Lines:</div>
+    <div style="display: flex; align-items: center; gap: 10px; margin: 6px 0;">
+      <div style="width: 30px; height: 3px; background: #4CAF50;"></div>
+      <div><span style="font-size: 12px;">&lt;380 kV</span> <span style="font-size: 10px; color: #666;">(132-330 kV)</span></div>
+    </div>
+    <div style="display: flex; align-items: center; gap: 10px; margin: 6px 0;">
+      <div style="width: 30px; height: 3px; background: #FF6B00;"></div>
+      <div><span style="font-size: 12px;">≥380 kV</span> <span style="font-size: 10px; color: #666;">(380-700 kV)</span></div>
+    </div>
+    <div style="font-weight: 600; font-size: 12px; color: #555; margin: 12px 0 6px 0;">Network Nodes:</div>
+    <div style="display: flex; align-items: center; gap: 10px; margin: 6px 0;">
+      <div style="width: 12px; height: 12px; background: #FF9800; border-radius: 50%;"></div>
+      <div style="font-size: 12px;">Substation</div>
+    </div>
+    <div style="display: flex; align-items: center; gap: 10px; margin: 6px 0;">
+      <div style="width: 12px; height: 12px; background: #2196F3; border-radius: 50%;"></div>
+      <div style="font-size: 12px;">Hydro Power</div>
+    </div>
+    <div style="display: flex; align-items: center; gap: 10px; margin: 6px 0;">
+      <div style="width: 12px; height: 12px; background: #00BCD4; border-radius: 50%;"></div>
+      <div style="font-size: 12px;">Wind Power</div>
+    </div>
+    <div style="display: flex; align-items: center; gap: 10px; margin: 6px 0;">
+      <div style="width: 12px; height: 12px; background: #FFC107; border-radius: 50%;"></div>
+      <div style="font-size: 12px;">Solar Power</div>
+    </div>
+    <div style="display: flex; align-items: center; gap: 10px; margin: 6px 0;">
+      <div style="width: 12px; height: 12px; background: #9C27B0; border-radius: 50%;"></div>
+      <div style="font-size: 12px;">Nuclear Power</div>
+    </div>
+    <div style="display: flex; align-items: center; gap: 10px; margin: 6px 0;">
+      <div style="width: 12px; height: 12px; background: #F44336; border-radius: 50%;"></div>
+      <div style="font-size: 12px;">Thermal Power</div>
+    </div>
+    <div style="display: flex; align-items: center; gap: 10px; margin: 6px 0;">
+      <div style="width: 12px; height: 12px; background: #9E9E9E; border-radius: 50%;"></div>
+      <div style="font-size: 12px;">Other/Unknown</div>
+    </div>
+    <div style="margin-top: 10px; padding-top: 8px; border-top: 1px solid #ddd; font-size: 10px; color: #666; font-style: italic;">
+      Data source: ENTSO-E European Network
+    </div>
+  `;
+  document.body.appendChild(gridLegend);
+  
+  // Create gas network legend
+  const gasLegend = document.createElement('div');
+  gasLegend.id = 'gas-legend';
+  gasLegend.style.cssText = `
+    position: absolute;
+    bottom: 80px;
+    right: 20px;
+    z-index: 1000;
+    background: rgba(255, 255, 255, 0.95);
+    padding: 15px;
+    border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+    font-size: 13px;
+    min-width: 240px;
+    display: none;
+    border: 2px solid #2196F3;
+  `;
+  gasLegend.innerHTML = `
+    <div style="font-weight: 700; font-size: 15px; color: #0D47A1; margin-bottom: 10px; border-bottom: 2px solid #2196F3; padding-bottom: 5px;">
+      ⛽ Europe Gas Pipeline Network
+    </div>
+    <div style="font-weight: 600; font-size: 12px; color: #555; margin: 10px 0 8px 0;">Pipeline Types:</div>
+    <div style="display: flex; align-items: center; gap: 10px; margin: 6px 0;">
+      <div style="width: 35px; height: 3px; background: #1B5E20;"></div>
+      <div style="font-size: 12px;">Natural Gas</div>
+    </div>
+    <div style="display: flex; align-items: center; gap: 10px; margin: 6px 0;">
+      <div style="width: 35px; height: 3px; background: #4A148C;"></div>
+      <div style="font-size: 12px;">Hydrogen (H₂)</div>
+    </div>
+    <div style="font-weight: 600; font-size: 12px; color: #555; margin: 14px 0 8px 0;">Status Legend:</div>
+    <div style="display: flex; align-items: center; gap: 10px; margin: 6px 0;">
+      <div style="width: 35px; height: 3px; background: #1B5E20; opacity: 0.8;"></div>
+      <div style="font-size: 12px;">Operating (solid, thick)</div>
+    </div>
+    <div style="display: flex; align-items: center; gap: 10px; margin: 6px 0;">
+      <div style="width: 35px; height: 2.5px; background: #1B5E20; opacity: 0.6;"></div>
+      <div style="font-size: 12px;">Under Construction</div>
+    </div>
+    <div style="display: flex; align-items: center; gap: 10px; margin: 6px 0;">
+      <div style="width: 35px; height: 0; border-top: 2px dashed #1B5E20; opacity: 0.6;"></div>
+      <div style="font-size: 12px;">Proposed (dashed)</div>
+    </div>
+    <div style="display: flex; align-items: center; gap: 10px; margin: 6px 0;">
+      <div style="width: 35px; height: 2.5px; background: #757575; opacity: 0.6;"></div>
+      <div style="font-size: 12px; color: #666;">Other Status (gray)</div>
+    </div>
+    <div style="margin-top: 12px; padding-top: 8px; border-top: 1px solid #ddd; font-size: 10px; color: #666; font-style: italic;">
+      Data source: Global Energy Monitor<br>Europe Gas Tracker (Jan 2025)
+    </div>
+  `;
+  document.body.appendChild(gasLegend);
   
   // Create opportunity heatmap legend
   const opportunityLegend = document.createElement('div');
@@ -2324,6 +2740,68 @@ def main():
         grid_edges = []
     ### <<< END ELECTRICITY NETWORK ADDITION <<<
 
+    ### >>> GAS NETWORK ADDITION <<<
+    # Load gas pipeline network from GeoJSON
+    gas_pipelines = []
+    try:
+        import json
+        geojson_path = "Europe Gas Tracker/GEM-EGT-Gas-Hydrogen-Pipelines-2025-01.geojson"
+        with open(geojson_path, 'r', encoding='utf-8') as f:
+            gas_data = json.load(f)
+        
+        for feature in gas_data['features']:
+            props = feature['properties']
+            geom = feature['geometry']
+            geom_type = geom['type']
+            
+            # Skip features with no geometry
+            if geom_type == 'GeometryCollection' and not geom.get('geometries'):
+                continue
+            
+            # Extract coordinates based on geometry type
+            coords_list = []
+            if geom_type == 'LineString':
+                coords_list = [geom['coordinates']]
+            elif geom_type == 'MultiLineString':
+                coords_list = geom['coordinates']
+            elif geom_type == 'GeometryCollection':
+                for sub_geom in geom.get('geometries', []):
+                    if sub_geom['type'] == 'LineString':
+                        coords_list.append(sub_geom['coordinates'])
+                    elif sub_geom['type'] == 'MultiLineString':
+                        coords_list.extend(sub_geom['coordinates'])
+            
+            # Store pipeline data
+            for coords in coords_list:
+                if coords and len(coords) > 1:
+                    gas_pipelines.append({
+                        "coordinates": [[lat, lon] for lon, lat in coords],  # Swap to [lat, lon]
+                        "name": props.get('PipelineName', 'N/A'),
+                        "segment": props.get('SegmentName', 'N/A'),
+                        "status": props.get('Status', 'N/A'),
+                        "fuel": props.get('Fuel', 'N/A'),
+                        "countries": props.get('Countries', 'N/A'),
+                        "owner": props.get('Owner', 'N/A'),
+                        "parent": props.get('Parent', 'N/A'),
+                        "start_year": props.get('StartYear1', 'N/A'),
+                        "capacity": props.get('Capacity', 'N/A'),
+                        "capacity_units": props.get('CapacityUnits', ''),
+                        "length": props.get('LengthMergedKm', 'N/A'),
+                        "diameter": props.get('Diameter', 'N/A'),
+                        "diameter_units": props.get('DiameterUnits', ''),
+                        "fuel_source": props.get('FuelSource', 'N/A'),
+                        "start_location": props.get('StartLocation', 'N/A'),
+                        "start_country": props.get('StartCountry', 'N/A'),
+                        "end_location": props.get('EndLocation', 'N/A'),
+                        "end_country": props.get('EndCountry', 'N/A')
+                    })
+        
+        print(f"Loaded {len(gas_pipelines)} gas pipeline segments")
+    except Exception as e:
+        print(f"Warning: Could not load gas network data: {e}")
+        gas_pipelines = []
+    ### <<< END GAS NETWORK ADDITION <<<
+
     # Bounds
     min_lat, max_lat = float(df[lat_col].min()), float(df[lat_col].max())
     min_lon, max_lon = float(df[lon_col].min()), float(df[lon_col].max())
@@ -2341,6 +2819,7 @@ def main():
         opportunity_points=opportunity_points,  # >>> OPPORTUNITY HEATMAP ADDITION <<<
         grid_nodes=grid_nodes,  # >>> ELECTRICITY NETWORK ADDITION <<<
         grid_edges=grid_edges,  # >>> ELECTRICITY NETWORK ADDITION <<<
+        gas_pipelines=gas_pipelines,  # >>> GAS NETWORK ADDITION <<<
         preselect_status_all=(args.preselect_status == "all"),
         preselect_techno_all=(args.preselect_techno == "all"),
         visibility_mode=args.visibility_mode,
