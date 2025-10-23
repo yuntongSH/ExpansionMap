@@ -234,6 +234,8 @@ def build_html(
     bounds,
     biogaz_points,
     biomethane_points,
+    feedstock_points,  # >>> NEW FEEDSTOCK HEATMAP <<<
+    papeterie_points,  # >>> NEW PAPETERIE HEATMAP <<<
     supply_points,
     offtake_points,
     competitors_points,
@@ -402,6 +404,13 @@ def build_html(
         </label>
         <input type="checkbox" id="toggle-biogas-heat">
       </div>
+      <div class="heatmap-control">
+        <label class="heatmap-label" for="toggle-feedstock-heat">
+          <div class="heatmap-indicator heatmap-supply"></div>
+          <span>Feedstock Heatmap</span>
+        </label>
+        <input type="checkbox" id="toggle-feedstock-heat">
+      </div>
     </div>
     
     <!-- Offtake Heatmap (parent) -->
@@ -472,6 +481,13 @@ def build_html(
           <span>Capture Projects Heatmap</span>
         </label>
         <input type="checkbox" id="toggle-capture-heat">
+      </div>
+      <div class="heatmap-control">
+        <label class="heatmap-label" for="toggle-papeterie-heat">
+          <div class="heatmap-indicator heatmap-competitors"></div>
+          <span>Papeterie Heatmap</span>
+        </label>
+        <input type="checkbox" id="toggle-papeterie-heat">
       </div>
     </div>
     
@@ -624,6 +640,8 @@ def build_html(
   const GRID_NODES = {json.dumps(grid_nodes or [])};  // >>> ELECTRICITY NETWORK ADDITION <<<
   const GRID_EDGES = {json.dumps(grid_edges or [])};  // >>> ELECTRICITY NETWORK ADDITION <<<
   const GAS_PIPELINES = {json.dumps(gas_pipelines or [])};  // >>> GAS NETWORK ADDITION <<<
+  const FEEDSTOCK_HEAT = {json.dumps(feedstock_points or [])};  // >>> NEW FEEDSTOCK HEATMAP <<<
+  const PAPETERIE_HEAT = {json.dumps(papeterie_points or [])};  // >>> NEW PAPETERIE HEATMAP <<<
 
   const map = L.map('map', {{ zoomControl: true }});
   // Use CartoDB Light (light gray background) for a clean, uniform appearance
@@ -819,7 +837,8 @@ def build_html(
     'Competitors': {{
       'BioCO₂': ['BioCO2'],
       'FossilCO₂': ['FossilCO2'],
-      'Capture projects': ['Capture']
+      'Capture projects': ['Capture'],
+      'Papeterie': ['Papeterie']
     }}
   }};
   
@@ -1415,7 +1434,7 @@ def build_html(
 
   // Supply Heatmap parent toggle
   document.getElementById('toggle-supply-heat').addEventListener('change', (e) => {{
-    const childCheckboxes = ['toggle-biomethane-heat', 'toggle-biogas-heat'];
+    const childCheckboxes = ['toggle-biomethane-heat', 'toggle-biogas-heat', 'toggle-feedstock-heat'];
     childCheckboxes.forEach(id => {{
       document.getElementById(id).checked = e.target.checked;
       document.getElementById(id).dispatchEvent(new Event('change'));
@@ -1449,6 +1468,21 @@ def build_html(
         supplyGradient
       );
       heatmaps.biogas.addTo(map);
+    }}
+  }});
+
+  // Feedstock heatmap
+  document.getElementById('toggle-feedstock-heat').addEventListener('change', (e) => {{
+    if (heatmaps.feedstock) {{
+      map.removeLayer(heatmaps.feedstock);
+      heatmaps.feedstock = null;
+    }}
+    if (e.target.checked) {{
+      heatmaps.feedstock = createHeatmap(
+        s => s.category === 'Feedstock',
+        supplyGradient
+      );
+      heatmaps.feedstock.addTo(map);
     }}
   }});
 
@@ -1529,7 +1563,7 @@ def build_html(
 
   // Competitors Heatmap parent toggle
   document.getElementById('toggle-competitors-heat').addEventListener('change', (e) => {{
-    const childCheckboxes = ['toggle-bioco2-heat', 'toggle-fossilco2-heat', 'toggle-capture-heat'];
+    const childCheckboxes = ['toggle-bioco2-heat', 'toggle-fossilco2-heat', 'toggle-capture-heat', 'toggle-papeterie-heat'];
     childCheckboxes.forEach(id => {{
       document.getElementById(id).checked = e.target.checked;
       document.getElementById(id).dispatchEvent(new Event('change'));
@@ -1581,6 +1615,22 @@ def build_html(
         3.0
       );
       heatmaps.capture.addTo(map);
+    }}
+  }});
+
+  // Papeterie heatmap
+  document.getElementById('toggle-papeterie-heat').addEventListener('change', (e) => {{
+    if (heatmaps.papeterie) {{
+      map.removeLayer(heatmaps.papeterie);
+      heatmaps.papeterie = null;
+    }}
+    if (e.target.checked) {{
+      heatmaps.papeterie = createHeatmap(
+        s => s.category === 'Papeterie',
+        competitorsGradient,
+        3.0
+      );
+      heatmaps.papeterie.addTo(map);
     }}
   }});
 
@@ -2694,6 +2744,12 @@ def main():
     biogaz_points = [[s["lat"], s["lon"], 1] for s in site_data if norm(s["techno"]) == "biogaz"]
     biomethane_points = [[s["lat"], s["lon"], 1] for s in site_data if norm(s["techno"]) == "biomethane"]
     
+    # Category-based heatmaps for Supply
+    feedstock_points = [[s["lat"], s["lon"], 1] for s in site_data if s["category"] == "Feedstock"]
+    
+    # Category-based heatmaps for Competitors
+    papeterie_points = [[s["lat"], s["lon"], 1] for s in site_data if s["category"] == "Papeterie"]
+    
     # Layer-based heatmaps
     supply_points = [[s["lat"], s["lon"], 1] for s in site_data if s["layer"] == "Supply"]
     offtake_points = [[s["lat"], s["lon"], 1] for s in site_data if s["layer"] == "Offtake"]
@@ -2813,6 +2869,8 @@ def main():
         bounds=(min_lat, min_lon, max_lat, max_lon),
         biogaz_points=biogaz_points,
         biomethane_points=biomethane_points,
+        feedstock_points=feedstock_points,  # >>> NEW FEEDSTOCK HEATMAP <<<
+        papeterie_points=papeterie_points,  # >>> NEW PAPETERIE HEATMAP <<<
         supply_points=supply_points,
         offtake_points=offtake_points,
         competitors_points=competitors_points,
