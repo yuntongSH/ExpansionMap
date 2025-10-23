@@ -342,6 +342,42 @@ def build_html(
   /* Efuels triangle marker (DivIcon) */
   .triangle-wrap {{ position: relative; width: 16px; height: 16px; display:flex; align-items:center; justify-content:center; }}
   .triangle {{ width: 0; height: 0; border-left: 8px solid transparent; border-right: 8px solid transparent; border-bottom: 14px solid; opacity: 0.85; }}
+  /* Capacity Filter Legend */
+  .capacity-legend {{ position: absolute; bottom: 20px; right: 20px; z-index: 1000; background: white; padding: 15px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); min-width: 220px; display: none; }}
+  .capacity-legend.visible {{ display: block; }}
+  .capacity-legend-title {{ font-weight: 700; font-size: 15px; margin-bottom: 12px; color: #00143B; border-bottom: 2px solid #00143B; padding-bottom: 6px; }}
+  .capacity-filter-row {{ display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; margin: 6px 0; background: #f9f9f9; border-radius: 6px; border: 1px solid #ddd; transition: all 0.2s; }}
+  .capacity-filter-row:hover {{ background: #f0f4ff; border-color: #00143B; }}
+  .capacity-filter-label {{ display: flex; align-items: center; gap: 8px; flex: 1; font-size: 13px; font-weight: 500; color: #333; }}
+  .capacity-filter-row input[type="checkbox"] {{ width: 18px; height: 18px; cursor: pointer; }}
+  .capacity-size-indicator {{ width: 14px; height: 14px; border-radius: 50%; border: 2px solid #00143B; background: #00143B; flex-shrink: 0; }}
+  .capacity-size-small {{ width: 10px; height: 10px; }}
+  .capacity-size-medium {{ width: 14px; height: 14px; }}
+  .capacity-size-large {{ width: 18px; height: 18px; }}
+  
+  /* Legend minimize/collapse functionality */
+  .legend-header {{ position: relative; cursor: pointer; user-select: none; }}
+  .legend-minimize-btn {{ 
+    position: absolute; 
+    top: 0; 
+    right: 0; 
+    background: rgba(0,0,0,0.1); 
+    border: none; 
+    border-radius: 4px; 
+    width: 24px; 
+    height: 24px; 
+    cursor: pointer; 
+    font-size: 16px; 
+    line-height: 1; 
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }}
+  .legend-minimize-btn:hover {{ background: rgba(0,0,0,0.2); transform: scale(1.1); }}
+  .legend-content {{ transition: max-height 0.3s ease, opacity 0.3s ease; overflow: hidden; }}
+  .legend-content.collapsed {{ max-height: 0 !important; opacity: 0; margin: 0; padding: 0; }}
+  .legend-collapsed {{ min-width: auto !important; }}
 </style>
 </head>
 <body>
@@ -828,6 +864,10 @@ def build_html(
   
   // Define sub-section groupings
   const subSectionGroups = {{
+    'Supply': {{
+      'Gas': ['Biomethane', 'Biogas'],
+      'Feedstock': ['Feedstock']
+    }},
     'Offtake': {{
       'Food processing': ['Food processing'],
       'E-fuels': ['E-methanol', 'E-SAF'],
@@ -1300,6 +1340,19 @@ def build_html(
   function applyFilters() {{
     const selectedTechnos = getSelected('tech');
     const selectedStatuses = getSelected('stat');
+    
+    // Get capacity filter states (if checkboxes exist)
+    const capacitySmallEl = document.getElementById('capacity-filter-small');
+    const capacityMediumEl = document.getElementById('capacity-filter-medium');
+    const capacityLargeEl = document.getElementById('capacity-filter-large');
+    const capacityNAEl = document.getElementById('capacity-filter-na');
+    const capacitySmall = capacitySmallEl ? capacitySmallEl.checked : true;
+    const capacityMedium = capacityMediumEl ? capacityMediumEl.checked : true;
+    const capacityLarge = capacityLargeEl ? capacityLargeEl.checked : true;
+    const capacityNA = capacityNAEl ? capacityNAEl.checked : true;
+    
+    // Check if all capacity filters are unchecked
+    const allCapacityFiltersUnchecked = !capacitySmall && !capacityMedium && !capacityLarge && !capacityNA;
 
     markersLayer.clearLayers();
 
@@ -1309,12 +1362,34 @@ def build_html(
       // For sites with no status (like Greenhouses), always consider statusOk as true if techno is selected
       const statusOk = s.status === '' ? true : (selectedStatuses.length === 0 ? false : selectedStatuses.includes(s.status));
       {vis_logic}
-      if (show) {{
+      
+      // Apply capacity filter only for Gas technos, and only if at least one capacity filter is checked
+      let capacityOk = true;
+      if (show && ['Bio-CNG', 'Bio-LNG', 'Biomethane', 'Biogas'].includes(s.techno) && !allCapacityFiltersUnchecked) {{
+        const capacity = parseFloat(s.capacity_gwh_year);
+        // Check if capacity is NaN, null, undefined, or 0 (treat as N/A)
+        if (isNaN(capacity) || capacity === 0 || s.capacity_gwh_year === null || s.capacity_gwh_year === undefined) {{
+          capacityOk = capacityNA;
+        }} else if (capacity < 20) {{
+          capacityOk = capacitySmall;
+        }} else if (capacity >= 20 && capacity <= 40) {{
+          capacityOk = capacityMedium;
+        }} else {{ // capacity > 40
+          capacityOk = capacityLarge;
+        }}
+      }}
+      
+      if (show && capacityOk) {{
         markersLayer.addLayer(m);
       }}
     }});
 
     updateVisibleCount();
+    
+    // Update capacity legend visibility if function exists
+    if (typeof updateCapacityLegendVisibility === 'function') {{
+      updateCapacityLegendVisibility();
+    }}
   }}
 
   document.querySelectorAll('#layer-supply-content input, #layer-offtake-content input, #layer-competitors-content input, #status-filters input')
@@ -2230,7 +2305,7 @@ def build_html(
     position: absolute;
     bottom: 20px;
     right: 20px;
-    z-index: 1000;
+    z-index: 1100;
     background: white;
     padding: 12px 16px;
     border-radius: 8px;
@@ -2280,9 +2355,11 @@ def build_html(
     border: 2px solid #7B1FA2;
   `;
   isochroneLegend.innerHTML = `
-    <div style="font-weight: 700; font-size: 15px; color: #7B1FA2; margin-bottom: 10px; border-bottom: 2px solid #7B1FA2; padding-bottom: 5px;">
+    <div class="legend-header" style="font-weight: 700; font-size: 15px; color: #7B1FA2; margin-bottom: 10px; border-bottom: 2px solid #7B1FA2; padding-bottom: 5px;">
       🚛 Heavy Truck Drive Time
+      <button class="legend-minimize-btn" onclick="toggleLegend('isochrone-legend')" title="Minimize">−</button>
     </div>
+    <div class="legend-content">
     <div style="display: flex; align-items: center; gap: 10px; margin: 8px 0;">
       <div style="width: 20px; height: 20px; background: rgba(186, 104, 200, 0.3); border: 2px solid #BA68C8; border-radius: 50%;"></div>
       <div>30 minutes</div>
@@ -2297,6 +2374,7 @@ def build_html(
     </div>
     <div style="margin-top: 10px; padding-top: 8px; border-top: 1px solid #ddd; font-size: 11px; color: #666; font-style: italic;">
       <span style="font-size: 10px;">2h estimated from 30min & 1h data</span>
+    </div>
     </div>
   `;
   document.body.appendChild(isochroneLegend);
@@ -2319,9 +2397,11 @@ def build_html(
     border: 2px solid #FF9800;
   `;
   gridLegend.innerHTML = `
-    <div style="font-weight: 700; font-size: 15px; color: #E65100; margin-bottom: 10px; border-bottom: 2px solid #FF9800; padding-bottom: 5px;">
+    <div class="legend-header" style="font-weight: 700; font-size: 15px; color: #E65100; margin-bottom: 10px; border-bottom: 2px solid #FF9800; padding-bottom: 5px;">
       ⚡ ENTSO-E Transmission Grid
+      <button class="legend-minimize-btn" onclick="toggleLegend('grid-legend')" title="Minimize">−</button>
     </div>
+    <div class="legend-content">
     <div style="font-weight: 600; font-size: 12px; color: #555; margin: 10px 0 6px 0;">Transmission Lines:</div>
     <div style="display: flex; align-items: center; gap: 10px; margin: 6px 0;">
       <div style="width: 30px; height: 3px; background: #4CAF50;"></div>
@@ -2363,6 +2443,7 @@ def build_html(
     <div style="margin-top: 10px; padding-top: 8px; border-top: 1px solid #ddd; font-size: 10px; color: #666; font-style: italic;">
       Data source: ENTSO-E European Network
     </div>
+    </div>
   `;
   document.body.appendChild(gridLegend);
   
@@ -2384,9 +2465,11 @@ def build_html(
     border: 2px solid #2196F3;
   `;
   gasLegend.innerHTML = `
-    <div style="font-weight: 700; font-size: 15px; color: #0D47A1; margin-bottom: 10px; border-bottom: 2px solid #2196F3; padding-bottom: 5px;">
+    <div class="legend-header" style="font-weight: 700; font-size: 15px; color: #0D47A1; margin-bottom: 10px; border-bottom: 2px solid #2196F3; padding-bottom: 5px;">
       ⛽ Europe Gas Pipeline Network
+      <button class="legend-minimize-btn" onclick="toggleLegend('gas-legend')" title="Minimize">−</button>
     </div>
+    <div class="legend-content">
     <div style="font-weight: 600; font-size: 12px; color: #555; margin: 10px 0 8px 0;">Pipeline Types:</div>
     <div style="display: flex; align-items: center; gap: 10px; margin: 6px 0;">
       <div style="width: 35px; height: 3px; background: #1B5E20;"></div>
@@ -2416,6 +2499,7 @@ def build_html(
     <div style="margin-top: 12px; padding-top: 8px; border-top: 1px solid #ddd; font-size: 10px; color: #666; font-style: italic;">
       Data source: Global Energy Monitor<br>Europe Gas Tracker (Jan 2025)
     </div>
+    </div>
   `;
   document.body.appendChild(gasLegend);
   
@@ -2437,9 +2521,11 @@ def build_html(
     border: 2px solid #00AA00;
   `;
   opportunityLegend.innerHTML = `
-    <div style="font-weight: 700; font-size: 15px; color: #00AA00; margin-bottom: 10px; border-bottom: 2px solid #00AA00; padding-bottom: 5px;">
+    <div class="legend-header" style="font-weight: 700; font-size: 15px; color: #00AA00; margin-bottom: 10px; border-bottom: 2px solid #00AA00; padding-bottom: 5px;">
       🎯 Opportunity Zones
+      <button class="legend-minimize-btn" onclick="toggleLegend('opportunity-legend')" title="Minimize">−</button>
     </div>
+    <div class="legend-content">
     <div style="display: flex; align-items: center; gap: 10px; margin: 8px 0;">
       <div style="width: 20px; height: 20px; background: #ADFF2F; border: 2px solid #9ACD32; border-radius: 50%;"></div>
       <div>Mild Opportunity</div>
@@ -2459,8 +2545,99 @@ def build_html(
     <div style="margin-top: 10px; padding-top: 8px; border-top: 1px solid #ddd; font-size: 11px; color: #666; font-style: italic;">
       <span style="font-size: 10px;">Supply + Offtake - Competitors</span>
     </div>
+    </div>
   `;
   document.body.appendChild(opportunityLegend);
+
+  // >>> CAPACITY FILTER LEGEND <<<
+  const capacityLegend = document.createElement('div');
+  capacityLegend.id = 'capacity-legend';
+  capacityLegend.className = 'capacity-legend';
+  capacityLegend.innerHTML = `
+    <div class="legend-header capacity-legend-title">
+      Gas Production Capacity Filter
+      <button class="legend-minimize-btn" onclick="toggleLegend('capacity-legend')" title="Minimize">−</button>
+    </div>
+    <div class="legend-content">
+    <div class="capacity-filter-row">
+      <label class="capacity-filter-label" for="capacity-filter-small">
+        <div class="capacity-size-indicator capacity-size-small"></div>
+        <span>&lt; 20 GWh/year</span>
+      </label>
+      <input type="checkbox" id="capacity-filter-small" checked>
+    </div>
+    <div class="capacity-filter-row">
+      <label class="capacity-filter-label" for="capacity-filter-medium">
+        <div class="capacity-size-indicator capacity-size-medium"></div>
+        <span>20 - 40 GWh/year</span>
+      </label>
+      <input type="checkbox" id="capacity-filter-medium" checked>
+    </div>
+    <div class="capacity-filter-row">
+      <label class="capacity-filter-label" for="capacity-filter-large">
+        <div class="capacity-size-indicator capacity-size-large"></div>
+        <span>&gt; 40 GWh/year</span>
+      </label>
+      <input type="checkbox" id="capacity-filter-large" checked>
+    </div>
+    <div class="capacity-filter-row">
+      <label class="capacity-filter-label" for="capacity-filter-na">
+        <div class="capacity-size-indicator" style="background: #999; border-color: #666;"></div>
+        <span>N/A (Unknown)</span>
+      </label>
+      <input type="checkbox" id="capacity-filter-na" checked>
+    </div>
+    </div>
+  `;
+  document.body.appendChild(capacityLegend);
+
+  // >>> CAPACITY FILTER LOGIC <<<
+  // Define Gas category technos (Bio-CNG, Bio-LNG, Biomethane, Biogas)
+  const GAS_TECHNOS = ['Bio-CNG', 'Bio-LNG', 'Biomethane', 'Biogas'];
+  
+  // Function to check if any Gas techno is selected
+  function areGasTechnosSelected() {{
+    const selectedTechnos = getSelected('tech');
+    return GAS_TECHNOS.some(techno => selectedTechnos.includes(techno));
+  }}
+  
+  // Function to update capacity legend visibility
+  function updateCapacityLegendVisibility() {{
+    const legend = document.getElementById('capacity-legend');
+    if (areGasTechnosSelected()) {{
+      legend.classList.add('visible');
+    }} else {{
+      legend.classList.remove('visible');
+    }}
+  }}
+  
+  // Add event listeners to capacity filter checkboxes
+  document.getElementById('capacity-filter-small').addEventListener('change', applyFilters);
+  document.getElementById('capacity-filter-medium').addEventListener('change', applyFilters);
+  document.getElementById('capacity-filter-large').addEventListener('change', applyFilters);
+  document.getElementById('capacity-filter-na').addEventListener('change', applyFilters);
+  
+  // Initial visibility check
+  updateCapacityLegendVisibility();
+  
+  // >>> LEGEND MINIMIZE/COLLAPSE FUNCTIONALITY <<<
+  function toggleLegend(legendId) {{
+    const legend = document.getElementById(legendId);
+    const content = legend.querySelector('.legend-content');
+    const btn = legend.querySelector('.legend-minimize-btn');
+    
+    if (content.classList.contains('collapsed')) {{
+      content.classList.remove('collapsed');
+      legend.classList.remove('legend-collapsed');
+      btn.textContent = '−';
+      btn.title = 'Minimize';
+    }} else {{
+      content.classList.add('collapsed');
+      legend.classList.add('legend-collapsed');
+      btn.textContent = '+';
+      btn.title = 'Expand';
+    }}
+  }}
 </script>
 </body>
 </html>
