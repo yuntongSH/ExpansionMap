@@ -985,7 +985,7 @@ def build_html(
   function getNodeColor(symbol) {{
     if (symbol.includes('Hydro')) return '#2196F3';  // Blue for hydro
     if (symbol.includes('Wind')) return '#006660';   // Cyan for wind
-    if (symbol.includes('Solar')) return '#D18F41';  // Amber for solar
+    if (symbol.includes('Solar')) return '#FF69B4';  // Pink for solar
     if (symbol.includes('Nuclear')) return '#9C27B0'; // Purple for nuclear
     if (symbol.includes('Thermal') || symbol.includes('Gas') || symbol.includes('Coal')) return '#F44336'; // Red for thermal
     if (symbol.includes('Substation')) return '#FF9800'; // Orange for substations
@@ -2425,7 +2425,7 @@ def build_html(
       <div style="font-size: 12px;">Wind Power</div>
     </div>
     <div style="display: flex; align-items: center; gap: 10px; margin: 6px 0;">
-      <div style="width: 12px; height: 12px; background: #FFC107; border-radius: 50%;"></div>
+      <div style="width: 12px; height: 12px; background: #FF69B4; border-radius: 50%;"></div>
       <div style="font-size: 12px;">Solar Power</div>
     </div>
     <div style="display: flex; align-items: center; gap: 10px; margin: 6px 0;">
